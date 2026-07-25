@@ -5,18 +5,27 @@ interface ApiErrorResponse {
   message?: string;
 }
 
+interface DataModelList {
+  data?: Array<{ id?: string }>;
+}
+
+interface ModelListRequest {
+  url: string;
+  headers: HeadersInit;
+}
+
 async function request<T>(
   url: string,
   headers: HeadersInit,
+  fallback?: () => Promise<T>,
 ): Promise<T> {
   const response = await fetch(url, { headers });
   let payload: unknown;
   try {
     payload = await response.json();
   } catch {
-    throw new Error(
-      `拉取模型失败：响应不是有效的 JSON（HTTP ${response.status}）`,
-    );
+    if (fallback) return fallback();
+    throw new Error(`拉取模型失败：响应不是有效的 JSON（HTTP ${response.status}）`);
   }
   if (!payload || typeof payload !== "object") {
     throw new Error(`拉取模型失败：响应格式错误（HTTP ${response.status}）`);
@@ -24,6 +33,7 @@ async function request<T>(
 
   const data = payload as T & ApiErrorResponse;
   if (!response.ok) {
+    if (response.status === 404 && fallback) return fallback();
     throw new Error(
       data.error?.message ??
         data.message ??
@@ -36,8 +46,15 @@ async function request<T>(
 async function fetchDataModelIds(
   url: string,
   headers: HeadersInit,
+  fallback?: ModelListRequest,
 ): Promise<string[]> {
-  const data = await request<{ data?: Array<{ id?: string }> }>(url, headers);
+  const data = await request<DataModelList>(
+    url,
+    headers,
+    fallback
+      ? () => request<DataModelList>(fallback.url, fallback.headers)
+      : undefined,
+  );
   return data.data?.flatMap(({ id }) => (id ? [id] : [])) ?? [];
 }
 
@@ -65,24 +82,23 @@ export async function fetchAIModelIds(
       break;
     }
     case "anthropic": {
-      try {
-        const url = new URL(`${baseUrl}/models`);
-        url.searchParams.set("limit", "1000");
-        models = await fetchDataModelIds(
-          url.toString(),
-          {
-            "anthropic-dangerous-direct-browser-access": "true",
-            "anthropic-version": "2023-06-01",
-            "x-api-key": apiKey,
-          },
-        );
-      } catch (error) {
-        const fallbackUrl = getOpenAIModelListUrl(baseUrl);
-        if (!fallbackUrl) throw error;
-        models = await fetchDataModelIds(fallbackUrl, {
-          Authorization: `Bearer ${apiKey}`,
-        });
-      }
+      const url = new URL(`${baseUrl}/models`);
+      const fallbackUrl = getOpenAIModelListUrl(baseUrl);
+      url.searchParams.set("limit", "1000");
+      models = await fetchDataModelIds(
+        url.toString(),
+        {
+          "anthropic-dangerous-direct-browser-access": "true",
+          "anthropic-version": "2023-06-01",
+          "x-api-key": apiKey,
+        },
+        fallbackUrl
+          ? {
+              url: fallbackUrl,
+              headers: { Authorization: `Bearer ${apiKey}` },
+            }
+          : undefined,
+      );
       break;
     }
     case "google": {
