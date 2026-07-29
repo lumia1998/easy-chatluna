@@ -261,12 +261,19 @@ export function AIModelSettings() {
 
             <div className="grid gap-2">
               <div className="flex items-center justify-between gap-2">
-                <Label htmlFor="ai-config-model">模型 ID</Label>
+                <div className="flex min-w-0 items-center gap-2">
+                  <Label htmlFor="ai-config-model">模型 ID</Label>
+                  {models.length > 0 && (
+                    <span className="truncate text-xs text-muted-foreground">
+                      已获取 {models.length} 个
+                    </span>
+                  )}
+                </div>
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  className="h-7 gap-1 px-2 text-xs"
+                  className="h-7 shrink-0 gap-1 px-2 text-xs"
                   disabled={loadingConfigId === selected.id}
                   onClick={handleFetchModels}
                 >
@@ -311,9 +318,9 @@ export function AIModelSettings() {
                         sideOffset={4}
                         className="z-50 flex max-h-[min(24rem,70vh)] w-[min(28rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-md border bg-popover p-0 text-popover-foreground shadow-md outline-none"
                       >
-                        <Command className="max-h-full">
+                        <Command className="min-h-0 max-h-full">
                           <CommandInput placeholder="搜索模型 ID" />
-                          <CommandList className="max-h-[min(18rem,50vh)] overflow-y-auto overscroll-contain">
+                          <CommandList className="min-h-0 max-h-[min(18rem,50vh)] overflow-y-scroll overscroll-contain [scrollbar-gutter:stable]">
                             <CommandEmpty>没有匹配的模型</CommandEmpty>
                             <CommandGroup>
                               {models.map((model) => (

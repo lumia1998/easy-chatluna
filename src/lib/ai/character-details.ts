@@ -1,3 +1,5 @@
+import type { BaseMessage } from "@/types/preset";
+
 export type CharacterAIDraftKey =
   | "bot_id"
   | "owner_id"
@@ -11,6 +13,22 @@ export type CharacterAIDraftKey =
   | "stickers";
 
 export type AIRoleDraftFields = Record<CharacterAIDraftKey, string>;
+
+const CHARACTER_AI_DRAFT_LABELS: Record<CharacterAIDraftKey, string> = {
+  bot_id: "Bot ID",
+  owner_id: "主人 ID",
+  description: "角色描述",
+  personality: "性格",
+  hobbies: "兴趣爱好",
+  dialogue_examples: "对话示例",
+  chat_style: "聊天风格",
+  chat_behavior: "聊天行为",
+  relationship: "人际关系",
+  stickers: "表情包规则",
+};
+
+const PRESERVED_DRAFT_START = "[用户原始角色设定开始]";
+const PRESERVED_DRAFT_END = "[用户原始角色设定结束]";
 
 export interface CharacterAIDetailFieldDef {
   key: CharacterAIDraftKey;
@@ -204,4 +222,55 @@ export function createEmptyAIRoleDraft(): AIRoleDraftFields {
   return Object.fromEntries(
     CHARACTER_AI_DRAFT_KEYS.map((key) => [key, ""]),
   ) as AIRoleDraftFields;
+}
+
+export function toAIRoleDraftFields(
+  source: Partial<Record<CharacterAIDraftKey, string | undefined>>,
+): AIRoleDraftFields {
+  return Object.fromEntries(
+    CHARACTER_AI_DRAFT_KEYS.map((key) => [key, source[key] ?? ""]),
+  ) as AIRoleDraftFields;
+}
+
+export function buildPreservedRoleDraftBlock(draft: AIRoleDraftFields): string {
+  const sections = CHARACTER_AI_DRAFT_KEYS.flatMap((key) => {
+    const value = draft[key];
+    return value.trim()
+      ? [`${CHARACTER_AI_DRAFT_LABELS[key]}:\n${value}`]
+      : [];
+  });
+
+  if (sections.length === 0) return "";
+  return [
+    PRESERVED_DRAFT_START,
+    "以下内容是用户原文，必须逐字遵守，不得改写、压缩或替换：",
+    ...sections,
+    PRESERVED_DRAFT_END,
+  ].join("\n\n");
+}
+
+export function appendPreservedRoleDraft(
+  system: string,
+  draft: AIRoleDraftFields,
+): string {
+  const block = buildPreservedRoleDraftBlock(draft);
+  if (!block) return system;
+  return `${system.trimEnd()}\n\n${block}`;
+}
+
+export function insertPreservedRoleDraftPrompt(
+  prompts: BaseMessage[],
+  draft: AIRoleDraftFields,
+): BaseMessage[] {
+  const block = buildPreservedRoleDraftBlock(draft);
+  if (!block) return prompts;
+
+  let insertAt = 0;
+  while (prompts[insertAt]?.role === "system") insertAt += 1;
+
+  return [
+    ...prompts.slice(0, insertAt),
+    { role: "system", type: "personality", content: block },
+    ...prompts.slice(insertAt),
+  ];
 }

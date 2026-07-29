@@ -1,5 +1,8 @@
 import type { StepResult, ToolSet } from "ai";
-import type { AIRoleDraftFields } from "@/lib/ai/character-details";
+import {
+  toAIRoleDraftFields,
+  type AIRoleDraftFields,
+} from "@/lib/ai/character-details";
 import {
   readPresetOrThrow,
   type PresetGenerateArtifact,
@@ -111,6 +114,7 @@ export async function generateMainPreset(
     presetId,
     model: modelConfig,
     format,
+    roleDraft: draft,
   });
 
   const prompt = buildMainGenerateUserPrompt(draft, current.keywords, format);
@@ -156,6 +160,7 @@ export async function generateCharacterPreset(
     presetId,
     model: modelConfig,
     format,
+    roleDraft: toAIRoleDraftFields(draft),
   });
 
   const prompt = buildCharacterGenerateUserPrompt(draft, format);
