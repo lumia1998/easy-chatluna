@@ -114,6 +114,8 @@ export default defineConfig({
         },
     },
     build: {
+        // The full preset editor is loaded only after opening an internal editor tab.
+        chunkSizeWarningLimit: 1300,
         rollupOptions: {
             /*  external: ["react", "react-dom", "react-router"],
             output: {

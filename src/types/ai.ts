@@ -51,8 +51,14 @@ export type GenerateProgressCallback = (
 ) => void;
 
 export const AI_MODEL_CONFIG_STORAGE_KEY = "chatluna_ai_model_configs";
+export const AI_MODEL_CONFIG_SECRET_STORAGE_KEY =
+  "chatluna_ai_model_config_secrets:v1";
+export const AI_MODEL_CONFIG_ENCRYPTED_SECRET_STORAGE_KEY =
+  "chatluna_ai_model_config_encrypted_secrets:v1";
 export const AI_MODEL_CONFIG_CHANGE_EVENT =
   "chatluna_ai_model_configs_changed";
+export const AI_MODEL_SECRET_PERSISTENCE_ERROR_EVENT =
+  "chatluna_ai_model_secret_persistence_error";
 
 export const AI_PROVIDER_LABELS: Record<AIProviderFormat, string> = {
   openai: "OpenAI",

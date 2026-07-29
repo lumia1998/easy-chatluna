@@ -126,6 +126,8 @@ interface CreatePresetToolsOptions {
   generateCharacterFormat?: CharacterPresetFormat;
   /** User-authored role fields that Generate must preserve verbatim. */
   preservedRoleDraft?: AIRoleDraftFields;
+  /** Revision captured before the Generate request started. */
+  expectedRevision?: number;
 }
 
 function truncate(text: string, max = MAX_TEXT): string {
@@ -973,43 +975,53 @@ function createPresetTools(
       // Synchronous claim before any await — blocks parallel double-writes.
       generateWriteGuard.claim();
       try {
-        const result = await mutatePreset(presetId, (latest) => {
-          if (latest.type !== "main") {
-            throw new Error(
-              "当前不是主插件预设，无法调用 replaceGeneratedMainPreset",
+        const result = await mutatePreset(
+          presetId,
+          (latest) => {
+            if (latest.type !== "main") {
+              throw new Error(
+                "当前不是主插件预设，无法调用 replaceGeneratedMainPreset",
+              );
+            }
+            const current = latest.preset as RawPreset;
+            const keywords = [
+              ...new Set(
+                (input.keywords as string[])
+                  .map((keyword) => keyword.trim())
+                  .filter(Boolean),
+              ),
+            ];
+            const prompts = input.prompts as BaseMessage[];
+            const next: RawPreset = {
+              ...current,
+              keywords,
+              prompts: options.preservedRoleDraft
+                ? insertPreservedRoleDraftPrompt(
+                    prompts,
+                    options.preservedRoleDraft,
+                  )
+                : prompts,
+              format_user_prompt: input.format_user_prompt,
+            };
+            validateMainPreset(next, { requireFormatPrompt: true });
+            const warnings = validateMainFormat(next, generateFormat);
+            const content = serializePresetData(next);
+            const fileName = buildPresetFileName(
+              next.keywords[0] || "main_preset",
             );
-          }
-          const current = latest.preset as RawPreset;
-          const keywords: string[] = Array.from(
-            new Set(input.keywords.map((k: string) => k.trim())),
-          );
-          const prompts = input.prompts as BaseMessage[];
-          const next: RawPreset = {
-            ...current,
-            keywords,
-            prompts: options.preservedRoleDraft
-              ? insertPreservedRoleDraftPrompt(
-                  prompts,
-                  options.preservedRoleDraft,
-                )
-              : prompts,
-            format_user_prompt: input.format_user_prompt,
-          };
-          validateMainPreset(next, { requireFormatPrompt: true });
-          const warnings = validateMainFormat(next, generateFormat);
-          // YAML preflight on the candidate snapshot before write.
-          const content = serializePresetData(next);
-          const fileName = buildPresetFileName(
-            next.keywords[0] || "main_preset",
-          );
-          return {
-            preset: next,
-            changedFields: ["keywords", "prompts", "format_user_prompt"],
-            message: "已生成并应用主插件预设核心字段",
-            warnings,
-            generateArtifact: { content, fileName },
-          };
-        });
+            return {
+              preset: next,
+              changedFields: ["keywords", "prompts", "format_user_prompt"],
+              message: "已生成并应用主插件预设核心字段",
+              warnings,
+              generateArtifact: { content, fileName },
+            };
+          },
+          {
+            expectedRevision: options.expectedRevision,
+            version: { label: "AI 生成版本", source: "ai-generation" },
+          },
+        );
         generateWriteGuard.markSuccess();
         return result;
       } catch (error) {
@@ -1077,6 +1089,9 @@ function createPresetTools(
             message: "已生成并应用伪装预设",
             generateArtifact: { content, fileName },
           };
+        }, {
+          expectedRevision: options.expectedRevision,
+          version: { label: "AI 生成版本", source: "ai-generation" },
         });
         generateWriteGuard.markSuccess();
         return result;
@@ -1320,6 +1335,7 @@ export function createGenerateMainAgent(options: {
   model: LanguageModel | AIModelConfig;
   format: MainPresetFormat;
   roleDraft: AIRoleDraftFields;
+  expectedRevision: number;
 }) {
   return createGenerateToolLoopAgent({
     id: `preset-generate-main-${options.presetId}`,
@@ -1331,6 +1347,7 @@ export function createGenerateMainAgent(options: {
     tools: createPresetTools(options.presetId, {
       generateMainFormat: options.format,
       preservedRoleDraft: options.roleDraft,
+      expectedRevision: options.expectedRevision,
     }),
     toolName: "replaceGeneratedMainPreset",
     stepLimit: 4,
@@ -1343,6 +1360,7 @@ export function createGenerateCharacterAgent(options: {
   model: LanguageModel | AIModelConfig;
   format: CharacterPresetFormat;
   roleDraft: AIRoleDraftFields;
+  expectedRevision: number;
 }) {
   return createGenerateToolLoopAgent({
     id: `preset-generate-character-${options.presetId}`,
@@ -1354,6 +1372,7 @@ export function createGenerateCharacterAgent(options: {
     tools: createPresetTools(options.presetId, {
       generateCharacterFormat: options.format,
       preservedRoleDraft: options.roleDraft,
+      expectedRevision: options.expectedRevision,
     }),
     toolName: "replaceGeneratedCharacterPreset",
     stepLimit: 2,

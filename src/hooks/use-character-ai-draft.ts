@@ -9,6 +9,7 @@ import {
 } from "@/lib/ai/character-details";
 import type { CharacterPresetTemplate } from "@/types/preset";
 import type { PresetFieldUpdater } from "@/hooks/use-preset-updater";
+import { toast } from "sonner";
 
 function readDraft(
   preset: CharacterPresetTemplate | null | undefined,
@@ -35,12 +36,15 @@ function persistField(
   updater: PresetFieldUpdater | undefined,
   key: CharacterAIDraftKey,
   value: string,
-) {
+) : Promise<void> {
   if (!updater) {
-    return;
+    return Promise.resolve();
   }
-  // Draft keys are top-level string fields on CharacterPresetTemplate.
-  void updater(key, value as never);
+  return updater(key, value as never);
+}
+
+function reportPersistError() {
+  toast.error("角色设定保存失败", { description: "请检查浏览器存储后重试" });
 }
 
 /**
@@ -53,6 +57,7 @@ export function useCharacterAIDraft(
   preset: CharacterPresetTemplate | null | undefined,
   updatePreset?: PresetFieldUpdater,
   debounceMs = 400,
+  activeVersionId?: string,
 ) {
   const [draft, setDraft] = useState<AIRoleDraftFields>(() =>
     readDraft(preset),
@@ -62,6 +67,7 @@ export function useCharacterAIDraft(
   const draftRef = useRef(draft);
   const generatedDraftRef = useRef(draft);
   const initializedRef = useRef(Boolean(preset));
+  const activeVersionRef = useRef(activeVersionId);
   const updatePresetRef = useRef(updatePreset);
   const pendingRef = useRef<Partial<Record<CharacterAIDraftKey, string>>>({});
   const timersRef = useRef<
@@ -77,8 +83,22 @@ export function useCharacterAIDraft(
   }, [updatePreset]);
 
   useEffect(() => {
-    if (!preset || initializedRef.current) {
+    if (!preset) {
       return;
+    }
+
+    const restoredVersionChanged = Boolean(
+      activeVersionId && activeVersionId !== activeVersionRef.current,
+    );
+    activeVersionRef.current = activeVersionId;
+    if (initializedRef.current && !restoredVersionChanged) return;
+
+    if (restoredVersionChanged) {
+      Object.values(timersRef.current).forEach((timeout) => {
+        if (timeout) clearTimeout(timeout);
+      });
+      timersRef.current = {};
+      pendingRef.current = {};
     }
 
     const nextDraft = readDraft(preset);
@@ -87,7 +107,7 @@ export function useCharacterAIDraft(
     generatedDraftRef.current = nextDraft;
     setDraft(nextDraft);
     setIsDirty(false);
-  }, [preset]);
+  }, [activeVersionId, preset]);
 
   useEffect(() => {
     return () => {
@@ -105,7 +125,7 @@ export function useCharacterAIDraft(
         if (value === undefined) {
           continue;
         }
-        persistField(updater, key, value);
+        void persistField(updater, key, value).catch(reportPersistError);
       }
     };
   }, []);
@@ -130,7 +150,9 @@ export function useCharacterAIDraft(
       timersRef.current[key] = setTimeout(() => {
         delete timersRef.current[key];
         delete pendingRef.current[key];
-        persistField(updatePresetRef.current, key, value);
+        void persistField(updatePresetRef.current, key, value).catch(
+          reportPersistError,
+        );
       }, debounceMs);
     },
     [debounceMs],
@@ -151,9 +173,32 @@ export function useCharacterAIDraft(
     [],
   );
 
-  const markGenerated = useCallback(() => {
-    generatedDraftRef.current = { ...draftRef.current };
-    setIsDirty(false);
+  const flushPending = useCallback(async (): Promise<boolean> => {
+    const writes: Promise<void>[] = [];
+    for (const key of CHARACTER_AI_DRAFT_KEYS) {
+      const timer = timersRef.current[key];
+      if (timer) clearTimeout(timer);
+      delete timersRef.current[key];
+      const value = pendingRef.current[key];
+      if (value === undefined) continue;
+      delete pendingRef.current[key];
+      writes.push(persistField(updatePresetRef.current, key, value));
+    }
+    const results = await Promise.allSettled(writes);
+    if (results.some((result) => result.status === "rejected")) {
+      reportPersistError();
+      return false;
+    }
+    return true;
+  }, []);
+
+  const markGenerated = useCallback((generatedDraft = draftRef.current) => {
+    generatedDraftRef.current = { ...generatedDraft };
+    setIsDirty(
+      CHARACTER_AI_DRAFT_KEYS.some(
+        (key) => draftRef.current[key] !== generatedDraft[key],
+      ),
+    );
   }, []);
 
   return {
@@ -162,5 +207,6 @@ export function useCharacterAIDraft(
     setField,
     getMergedCharacterPreset,
     markGenerated,
+    flushPending,
   };
 }

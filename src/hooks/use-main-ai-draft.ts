@@ -123,9 +123,9 @@ export function useMainAIDraft(presetId: string) {
     [schedulePersist],
   );
 
-  const markGenerated = useCallback(() => {
-    generatedDraftRef.current = { ...draftRef.current };
-    setIsDirty(false);
+  const markGenerated = useCallback((generatedDraft = draftRef.current) => {
+    generatedDraftRef.current = { ...generatedDraft };
+    setIsDirty(!draftsEqual(draftRef.current, generatedDraft));
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = null;
     pendingStoreRef.current = null;

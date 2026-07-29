@@ -8,32 +8,51 @@ export function cn(...inputs: ClassValue[]) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function updateNestedObject<T>(obj: T, path: string, value: any): T {
   const keys = path.split(".")
-  if (keys.length === 0) return obj
+  const blockedKeys = new Set(["__proto__", "prototype", "constructor"])
+  if (!path || keys.some((key) => !key || blockedKeys.has(key))) {
+    throw new Error("无效的嵌套字段路径")
+  }
 
-  const result = Array.isArray(obj) ? ([...obj] as T) : ({ ...obj } as T)
-  let target = result
-  let current = obj
+  const result = cloneContainer(obj, keys[0]) as T
+  let target = result as Record<string, unknown> | unknown[]
+  let current: unknown = obj
 
   for (let i = 0; i < keys.length - 1; i++) {
     const key = keys[i]
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentValue = (current as any)[key]
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let nextValue: any = {}
-    if (Array.isArray(currentValue)) {
-      nextValue = [...currentValue]
-    } else if (currentValue !== undefined) {
-      nextValue = { ...currentValue }
-    }
-
-    target[key as keyof typeof target] = nextValue
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    current = (current as any)[key]
+    const currentValue = isContainer(current) ? current[key] : undefined
+    const nextValue = cloneContainer(currentValue, keys[i + 1])
+    setContainerValue(target, key, nextValue)
+    current = currentValue
     target = nextValue
   }
 
-  target[keys.at(-1) as keyof typeof target] = value
+  setContainerValue(target, keys.at(-1)!, value)
   return result
+}
+
+function isContainer(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function cloneContainer(
+  value: unknown,
+  nextKey: string,
+): Record<string, unknown> | unknown[] {
+  if (Array.isArray(value)) return [...value]
+  if (isContainer(value)) return { ...value }
+  return /^\d+$/.test(nextKey) ? [] : {}
+}
+
+function setContainerValue(
+  target: Record<string, unknown> | unknown[],
+  key: string,
+  value: unknown,
+) {
+  if (Array.isArray(target) && /^\d+$/.test(key)) {
+    target[Number(key)] = value
+    return
+  }
+  ;(target as Record<string, unknown>)[key] = value
 }
 
 export async function sha1(str: string) {

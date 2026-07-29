@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { generateText } from "ai";
 import { useNavigate } from "react-router";
 import {
   Bot,
   Check,
+  ChevronDown,
   ChevronRight,
   Download,
   FileText,
@@ -21,17 +22,21 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TemplateEditor } from "@/components/template-editor";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { Toaster } from "@/components/ui/sonner";
-import { useAIModelConfigs } from "@/hooks/use-ai-model-configs";
+import { useModelReasoningLevels } from "@/hooks/use-model-reasoning-levels";
+import { useScopedAIModel } from "@/hooks/use-scoped-ai-model";
 import { createLanguageModelFromConfig } from "@/lib/ai/model-provider";
 import { isAIModelConfigReady } from "@/lib/ai/model-config";
 import { sanitizeAIErrorMessage } from "@/lib/ai/error-sanitize";
@@ -40,12 +45,25 @@ import {
   WORKSPACE_STARTERS,
   XIAOKUI_REFERENCES,
   getDefaultFormat,
-  type WorkspaceFormat,
   type WorkspacePresetType,
 } from "@/lib/preset-workspace-data";
+import {
+  serializeWorkspacePreset,
+  workspaceExportFileName,
+} from "@/lib/workspace-preset-export";
 import { cn } from "@/lib/utils";
+import {
+  AI_PROVIDER_LABELS,
+  AI_REASONING_LABELS,
+  type AIReasoningLevel,
+} from "@/types/ai";
+import { toast } from "sonner";
 
 type WorkspacePane = "outline" | "editor" | "reference" | "assistant";
+interface StoredWorkspaceDraft {
+  source: string;
+  fileName: string;
+}
 
 interface OutlineEntry {
   level: number;
@@ -67,30 +85,103 @@ function parseOutline(source: string): OutlineEntry[] {
   });
 }
 
-function downloadMarkdown(fileName: string, source: string) {
-  const blob = new Blob([source], { type: "text/markdown;charset=utf-8" });
+function downloadPreset(fileName: string, source: string) {
+  const blob = new Blob([source], { type: "text/yaml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = fileName.endsWith(".md") ? fileName : `${fileName}.md`;
+  anchor.download = workspaceExportFileName(fileName);
   anchor.click();
   URL.revokeObjectURL(url);
 }
 
-export function PresetWorkspace({ type }: { type: WorkspacePresetType }) {
+function defaultWorkspaceFileName(type: WorkspacePresetType): string {
+  return type === "main" ? "我的主预设.md" : "我的伪装预设.md";
+}
+
+function loadWorkspaceDraft(
+  key: string,
+  type: WorkspacePresetType,
+  legacyKey?: string,
+): { draft: StoredWorkspaceDraft; failed: boolean } {
+  const fallback = {
+    source: WORKSPACE_STARTERS[type],
+    fileName: defaultWorkspaceFileName(type),
+  };
+  try {
+    for (const candidate of [key, legacyKey].filter(
+      (value): value is string => Boolean(value),
+    )) {
+      const raw = localStorage.getItem(candidate);
+      if (raw === null) continue;
+      try {
+        const parsed = JSON.parse(raw) as Partial<StoredWorkspaceDraft>;
+        if (parsed && typeof parsed.source === "string") {
+          return {
+            draft: {
+              source: parsed.source,
+              fileName:
+                typeof parsed.fileName === "string" && parsed.fileName
+                  ? parsed.fileName
+                  : fallback.fileName,
+            },
+            failed: false,
+          };
+        }
+      } catch {
+        return { draft: { ...fallback, source: raw }, failed: false };
+      }
+    }
+    return { draft: fallback, failed: false };
+  } catch {
+    return { draft: fallback, failed: true };
+  }
+}
+
+function saveWorkspaceDraft(key: string, draft: StoredWorkspaceDraft): boolean {
+  try {
+    localStorage.setItem(key, JSON.stringify(draft));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function PresetWorkspace({
+  type,
+  embedded = false,
+}: {
+  type: WorkspacePresetType;
+  embedded?: boolean;
+}) {
   const navigate = useNavigate();
-  const { activeConfig } = useAIModelConfigs();
-  const [format, setFormat] = useState<WorkspaceFormat>(() =>
-    getDefaultFormat(type),
+  const {
+    selectedConfig: assistantConfig,
+    selectionValue: assistantModelValue,
+    options: assistantModelOptions,
+    setSelectionValue: setAssistantModelValue,
+    setReasoning: setAssistantReasoning,
+  } = useScopedAIModel(`preset-workspace:${type}`);
+  const reasoningLevels = useModelReasoningLevels(assistantConfig);
+  const assistantReasoning = assistantConfig
+    ? reasoningLevels.includes(assistantConfig.reasoning)
+      ? assistantConfig.reasoning
+      : reasoningLevels.includes("medium")
+        ? "medium"
+        : reasoningLevels[0]
+    : undefined;
+  const storageKey = `easy-chatluna:workspace:${type}`;
+  const [initialDraft] = useState(() =>
+    loadWorkspaceDraft(
+      storageKey,
+      type,
+      `easy-chatluna:workspace:${type}:${getDefaultFormat(type)}`,
+    ),
   );
-  const storageKey = `easy-chatluna:workspace:${type}:${format}`;
-  const [source, setSource] = useState(() =>
-    localStorage.getItem(storageKey) || WORKSPACE_STARTERS[type],
-  );
-  const [fileName, setFileName] = useState(
-    type === "main" ? "我的主预设.md" : "我的伪装预设.md",
-  );
-  const [saveState, setSaveState] = useState<"saved" | "saving">("saved");
+  const [source, setSource] = useState(initialDraft.draft.source);
+  const [fileName, setFileName] = useState(initialDraft.draft.fileName);
+  const latestDraftRef = useRef({ storageKey, source, fileName });
+  const saveErrorShownRef = useRef(initialDraft.failed);
   const [mobilePane, setMobilePane] = useState<WorkspacePane>("editor");
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantMessages, setAssistantMessages] = useState<string[]>([
@@ -112,17 +203,33 @@ export function PresetWorkspace({ type }: { type: WorkspacePresetType }) {
   );
 
   useEffect(() => {
-    setSource(localStorage.getItem(storageKey) || WORKSPACE_STARTERS[type]);
-  }, [storageKey, type]);
-
-  useEffect(() => {
-    setSaveState("saving");
+    latestDraftRef.current = { storageKey, source, fileName };
     const timeout = window.setTimeout(() => {
-      localStorage.setItem(storageKey, source);
-      setSaveState("saved");
+      const saved = saveWorkspaceDraft(storageKey, { source, fileName });
+      if (!saved && !saveErrorShownRef.current) {
+        saveErrorShownRef.current = true;
+        toast.error("本地草稿保存失败，请检查浏览器存储空间");
+      } else if (saved) {
+        saveErrorShownRef.current = false;
+      }
     }, 450);
     return () => window.clearTimeout(timeout);
-  }, [source, storageKey]);
+  }, [fileName, source, storageKey]);
+
+  useEffect(() => {
+    const flush = () => {
+      const latest = latestDraftRef.current;
+      saveWorkspaceDraft(latest.storageKey, {
+        source: latest.source,
+        fileName: latest.fileName,
+      });
+    };
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, []);
 
   const addSection = () => {
     setSource((current) => `${current.trimEnd()}\n\n## 新章节\n\n在这里填写内容。\n`);
@@ -132,7 +239,7 @@ export function PresetWorkspace({ type }: { type: WorkspacePresetType }) {
   const askAssistant = async () => {
     const value = assistantInput.trim();
     if (!value || assistantBusy) return;
-    if (!isAIModelConfigReady(activeConfig)) {
+    if (!isAIModelConfigReady(assistantConfig)) {
       setAssistantMessages((messages) => [
         ...messages,
         `你：${value}`,
@@ -147,11 +254,12 @@ export function PresetWorkspace({ type }: { type: WorkspacePresetType }) {
 
     try {
       const result = await generateText({
-        model: createLanguageModelFromConfig(activeConfig),
+        model: createLanguageModelFromConfig(assistantConfig),
+        reasoning: assistantReasoning,
         maxOutputTokens: 700,
         system:
           "你是 ChatLuna 预设编辑助手。用户文档中的性格、兴趣、聊天风格、聊天行为及其他原始描述必须逐字保留。禁止重写整份文档。只给出可选的局部修改建议，明确插入位置，并使用短小的 Markdown 或 unified diff。没有必要修改时直接说明。",
-        prompt: `当前预设格式：${format}\n当前文档：\n---\n${source}\n---\n用户请求：${value}`,
+        prompt: `当前文档：\n---\n${source}\n---\n用户请求：${value}`,
       });
       setAssistantMessages((messages) => [
         ...messages,
@@ -162,7 +270,7 @@ export function PresetWorkspace({ type }: { type: WorkspacePresetType }) {
         ...messages,
         `助手：${sanitizeAIErrorMessage(
           error instanceof Error ? error.message : "请求模型失败",
-          activeConfig.apiKey,
+          assistantConfig.apiKey,
         )}`,
       ]);
     } finally {
@@ -172,8 +280,8 @@ export function PresetWorkspace({ type }: { type: WorkspacePresetType }) {
 
   const analyzeDocument = async () => {
     if (analysisBusy || assistantBusy) return;
-    if (!isAIModelConfigReady(activeConfig)) {
-      setAnalysisResult("请先在设置中同步模型列表，并从首页选择当前模型。");
+    if (!isAIModelConfigReady(assistantConfig)) {
+      setAnalysisResult("请先在设置中配置模型，并为编辑助手选择一个模型。");
       return;
     }
 
@@ -182,11 +290,12 @@ export function PresetWorkspace({ type }: { type: WorkspacePresetType }) {
     setAnalysisResult("");
     try {
       const result = await generateText({
-        model: createLanguageModelFromConfig(activeConfig),
+        model: createLanguageModelFromConfig(assistantConfig),
+        reasoning: assistantReasoning,
         maxOutputTokens: 1200,
         system:
           "你是 ChatLuna 角色预设评审助手。分析整份预设，不重写用户原文，不虚构用户没有提供的设定。重点判断角色核心是否清楚、性格是否完整且一致、兴趣是否支撑角色、聊天风格和聊天行为是否可执行、各部分是否冲突或重复。输出简洁 Markdown，依次包含：总体判断、性格完整性、行为一致性、缺失或冲突、按优先级排列的优化方向。每条建议必须指出对应章节和具体补充方向。",
-        prompt: `预设类型：${type === "main" ? "主插件预设" : "伪装预设"}\n格式：${format}\n请分析以下完整文档：\n\n---\n${sourceSnapshot}\n---`,
+        prompt: `预设类型：${type === "main" ? "主插件预设" : "伪装预设"}\n请分析以下完整文档：\n\n---\n${sourceSnapshot}\n---`,
       });
       setAnalysisResult(result.text || "模型没有返回分析结果。");
       setAnalysisSource(sourceSnapshot);
@@ -195,7 +304,7 @@ export function PresetWorkspace({ type }: { type: WorkspacePresetType }) {
       setAnalysisResult(
         sanitizeAIErrorMessage(
           error instanceof Error ? error.message : "全文分析失败",
-          activeConfig.apiKey,
+          assistantConfig.apiKey,
         ),
       );
     } finally {
@@ -204,55 +313,94 @@ export function PresetWorkspace({ type }: { type: WorkspacePresetType }) {
   };
 
   return (
-    <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-background text-foreground">
-      <header className="grid h-12 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b px-3">
-        <button
-          type="button"
-          className="flex w-fit items-center gap-2 text-sm font-semibold"
-          onClick={() => navigate("/")}
-        >
-          <img
-            src={`${import.meta.env.BASE_URL}logo.png`}
-            alt="Easy ChatLuna"
-            className="size-6 rounded-md object-cover"
-          />
-          <span className="hidden sm:inline">Easy ChatLuna</span>
-        </button>
+    <div className={cn("flex min-h-0 flex-col overflow-hidden bg-background text-foreground", embedded ? "h-full" : "h-screen")}>
+      <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b px-3">
+        {!embedded && (
+          <button
+            type="button"
+            className="flex w-fit shrink-0 items-center gap-2 text-sm font-semibold"
+            onClick={() => navigate("/")}
+          >
+            <img
+              src={`${import.meta.env.BASE_URL}logo.png`}
+              alt="Easy ChatLuna"
+              className="size-6 rounded-md object-cover"
+            />
+            <span className="hidden sm:inline">Easy ChatLuna</span>
+          </button>
+        )}
 
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
           <FileText className="size-3.5 text-muted-foreground" />
           <input
             value={fileName}
             onChange={(event) => setFileName(event.target.value)}
-            className="w-44 bg-transparent text-center text-sm font-medium outline-none sm:w-64"
+            className="min-w-0 max-w-64 flex-1 bg-transparent text-center text-sm font-medium outline-none"
             aria-label="文件名"
           />
         </div>
 
         <div className="flex items-center justify-end gap-1">
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="gap-2"
-            onClick={() => downloadMarkdown(fileName, source)}
-          >
-            <Download className="size-4" />
-            <span className="hidden sm:inline">导出</span>
-          </Button>
-          <SettingsDialog
-            trigger={
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <Button
                 type="button"
-                size="icon"
+                size="sm"
                 variant="ghost"
-                aria-label="设置"
-                title="设置"
+                className="gap-2"
+                aria-label="导出 YAML"
+                title="选择格式并导出 YAML"
               >
-                <Settings2 className="size-4" />
+                <Download className="size-4" />
+                <span className="hidden sm:inline">导出</span>
+                <ChevronDown className="size-3.5 text-muted-foreground" />
               </Button>
-            }
-          />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72">
+              <DropdownMenuLabel>选择导出格式</DropdownMenuLabel>
+              {WORKSPACE_FORMATS[type].map((option) => (
+                <DropdownMenuItem
+                  key={option.value}
+                  className="items-start px-2 py-2"
+                  onSelect={() => {
+                    try {
+                      downloadPreset(
+                        fileName,
+                        serializeWorkspacePreset(source, type, option.value),
+                      );
+                    } catch (error) {
+                      toast.error(
+                        error instanceof Error ? error.message : "导出预设失败",
+                      );
+                    }
+                  }}
+                >
+                  <Download className="mt-0.5 size-4" />
+                  <span className="min-w-0">
+                    <span className="block font-medium">{option.label}</span>
+                    <span className="block text-xs leading-5 text-muted-foreground">
+                      {option.description}
+                    </span>
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {!embedded && (
+            <SettingsDialog
+              trigger={
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  aria-label="设置"
+                  title="设置"
+                >
+                  <Settings2 className="size-4" />
+                </Button>
+              }
+            />
+          )}
         </div>
       </header>
 
@@ -293,7 +441,7 @@ export function PresetWorkspace({ type }: { type: WorkspacePresetType }) {
           <OutlinePane outline={outline} onAdd={addSection} />
           <EditorPane source={source} onChange={setSource} />
           <ReferencePane
-            format={format}
+            type={type}
             collapsed={referenceCollapsed}
             onToggle={() => setReferenceCollapsed((current) => !current)}
           />
@@ -308,6 +456,12 @@ export function PresetWorkspace({ type }: { type: WorkspacePresetType }) {
             onInputChange={setAssistantInput}
             onSubmit={askAssistant}
             onAnalyze={analyzeDocument}
+            modelValue={assistantModelValue}
+            modelOptions={assistantModelOptions}
+            onModelChange={setAssistantModelValue}
+            reasoning={assistantReasoning}
+            reasoningLevels={reasoningLevels}
+            onReasoningChange={setAssistantReasoning}
           />
         </div>
 
@@ -318,7 +472,7 @@ export function PresetWorkspace({ type }: { type: WorkspacePresetType }) {
           {mobilePane === "editor" && (
             <EditorPane source={source} onChange={setSource} />
           )}
-          {mobilePane === "reference" && <ReferencePane format={format} />}
+          {mobilePane === "reference" && <ReferencePane type={type} />}
           {mobilePane === "assistant" && (
             <AssistantPane
               messages={assistantMessages}
@@ -331,51 +485,18 @@ export function PresetWorkspace({ type }: { type: WorkspacePresetType }) {
               onInputChange={setAssistantInput}
               onSubmit={askAssistant}
               onAnalyze={analyzeDocument}
+              modelValue={assistantModelValue}
+              modelOptions={assistantModelOptions}
+              onModelChange={setAssistantModelValue}
+              reasoning={assistantReasoning}
+              reasoningLevels={reasoningLevels}
+              onReasoningChange={setAssistantReasoning}
             />
           )}
         </div>
       </main>
 
-      <footer className="flex h-8 shrink-0 items-center justify-between border-t px-3 text-xs text-muted-foreground">
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5">
-            <span
-              className={cn(
-                "size-1.5 rounded-full",
-                saveState === "saved" ? "bg-emerald-500" : "bg-amber-500",
-              )}
-            />
-            {saveState === "saved" ? "已自动保存" : "保存中"}
-          </span>
-          <span>{type === "main" ? "主插件预设" : "伪装预设"}</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <Select
-            value={format}
-            onValueChange={(value) => setFormat(value as WorkspaceFormat)}
-          >
-            <SelectTrigger className="h-6 w-auto min-w-28 border-0 bg-transparent px-1 text-xs shadow-none">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent align="end">
-              {WORKSPACE_FORMATS[type].map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <span className="hidden sm:inline">
-            {missingSections.length === 0
-              ? "结构完整"
-              : `${missingSections.length} 项建议`}
-          </span>
-          <span className="max-w-40 truncate">
-            {activeConfig?.model || "未选择模型"}
-          </span>
-        </div>
-      </footer>
-      <Toaster />
+      {!embedded && <Toaster />}
     </div>
   );
 }
@@ -454,11 +575,11 @@ function EditorPane({
 }
 
 function ReferencePane({
-  format,
+  type,
   collapsed = false,
   onToggle,
 }: {
-  format: WorkspaceFormat;
+  type: WorkspacePresetType;
   collapsed?: boolean;
   onToggle?: () => void;
 }) {
@@ -488,7 +609,7 @@ function ReferencePane({
       </div>
       {!collapsed && (
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
-          <ReferenceText value={XIAOKUI_REFERENCES[format]} />
+          <ReferenceText value={XIAOKUI_REFERENCES[getDefaultFormat(type)]} />
         </div>
       )}
     </section>
@@ -514,6 +635,12 @@ function AssistantPane({
   onInputChange,
   onSubmit,
   onAnalyze,
+  modelValue,
+  modelOptions,
+  onModelChange,
+  reasoning,
+  reasoningLevels,
+  onReasoningChange,
 }: {
   messages: string[];
   input: string;
@@ -525,11 +652,18 @@ function AssistantPane({
   onInputChange: (value: string) => void;
   onSubmit: () => void;
   onAnalyze: () => void;
+  modelValue: string;
+  modelOptions: ReturnType<typeof useScopedAIModel>["options"];
+  onModelChange: (value: string) => void;
+  reasoning: AIReasoningLevel | undefined;
+  reasoningLevels: AIReasoningLevel[];
+  onReasoningChange: (reasoning: AIReasoningLevel) => void;
 }) {
+  const selectedModel = modelOptions.find((option) => option.value === modelValue);
   return (
     <section className="flex h-full min-h-0 flex-col bg-muted/5">
       <Tabs defaultValue="chat" className="min-h-0 flex-1 gap-0">
-        <div className="flex h-9 shrink-0 items-center border-b px-2">
+        <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b px-2">
           <TabsList variant="line" className="h-7">
             <TabsTrigger value="chat" className="gap-1.5 text-xs">
               <MessageSquare className="size-3" />
@@ -540,6 +674,58 @@ function AssistantPane({
               分析建议
             </TabsTrigger>
           </TabsList>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 min-w-0 max-w-44 gap-1.5 px-2 text-xs"
+                aria-label="编辑助手模型与思考等级"
+              >
+                <span className="truncate">
+                  {selectedModel?.model || "选择助手模型"}
+                </span>
+                {reasoning && (
+                  <span className="shrink-0 text-muted-foreground">
+                    {AI_REASONING_LABELS[reasoning]}
+                  </span>
+                )}
+                <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72">
+              <DropdownMenuLabel>编辑助手模型</DropdownMenuLabel>
+              <DropdownMenuRadioGroup value={modelValue} onValueChange={onModelChange}>
+                {modelOptions.map((option) => (
+                  <DropdownMenuRadioItem key={option.value} value={option.value}>
+                    <span className="min-w-0 flex-1 truncate">{option.model}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {AI_PROVIDER_LABELS[option.provider]}
+                    </span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+              {reasoningLevels.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>思考等级</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    value={reasoning}
+                    onValueChange={(value) =>
+                      onReasoningChange(value as AIReasoningLevel)
+                    }
+                  >
+                    {reasoningLevels.map((level) => (
+                      <DropdownMenuRadioItem key={level} value={level}>
+                        {AI_REASONING_LABELS[level]}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col">

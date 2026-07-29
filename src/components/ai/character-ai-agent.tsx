@@ -38,18 +38,20 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
+  AI_PROVIDER_LABELS,
   AI_REASONING_LABELS,
   type AIModelConfig,
   type AIReasoningLevel,
 } from "@/types/ai";
 import { useAIModelConfigs } from "@/hooks/use-ai-model-configs";
+import {
+  useScopedAIModel,
+  type ScopedAIModelOption,
+} from "@/hooks/use-scoped-ai-model";
 import { useModelReasoningLevels } from "@/hooks/use-model-reasoning-levels";
 import { isAIModelConfigReady } from "@/lib/ai/model-config";
 import {
@@ -136,14 +138,15 @@ export function CharacterAIAgent({
   name = "Character Agent",
   onNewChatActionChange,
 }: CharacterAIAgentProps) {
+  const { updateConfig } = useAIModelConfigs();
   const {
-    configs,
-    activeConfig,
-    isActiveReady,
-    updateConfig,
-  } = useAIModelConfigs();
+    selectedConfig,
+    selectionValue,
+    options: modelOptions,
+    setSelectionValue,
+  } = useScopedAIModel("preset-agent");
   const reasoningLevels = useModelReasoningLevels(
-    activeConfig ?? {
+    selectedConfig ?? {
       id: "",
       name: "",
       provider: "openai",
@@ -155,7 +158,7 @@ export function CharacterAIAgent({
     },
   );
 
-  if (!isActiveReady || !activeConfig) {
+  if (!isAIModelConfigReady(selectedConfig)) {
     return (
       <Conversation className="min-h-[calc(100dvh-11rem)] flex-none overflow-visible">
         <ConversationContent className="min-h-full">
@@ -170,8 +173,8 @@ export function CharacterAIAgent({
   }
 
   let reasoning = reasoningLevels[0];
-  if (reasoningLevels.includes(activeConfig.reasoning)) {
-    reasoning = activeConfig.reasoning;
+  if (reasoningLevels.includes(selectedConfig.reasoning)) {
+    reasoning = selectedConfig.reasoning;
   } else if (reasoningLevels.includes("medium")) {
     reasoning = "medium";
   }
@@ -181,14 +184,15 @@ export function CharacterAIAgent({
       presetId={presetId}
       presetType={presetType}
       name={name}
-      modelConfig={activeConfig}
-      modelLabel={activeConfig.model}
+      modelConfig={selectedConfig}
+      modelLabel={selectedConfig.model}
       reasoning={reasoning}
       reasoningLevels={reasoningLevels}
-      modelOptions={configs.filter(isAIModelConfigReady)}
-      onModelIdChange={(model) => updateConfig(activeConfig.id, { model })}
+      modelSelectionValue={selectionValue}
+      modelOptions={modelOptions}
+      onModelSelectionChange={setSelectionValue}
       onReasoningChange={(nextReasoning) =>
-        updateConfig(activeConfig.id, { reasoning: nextReasoning })
+        updateConfig(selectedConfig.id, { reasoning: nextReasoning })
       }
       onNewChatActionChange={onNewChatActionChange}
     />
@@ -203,8 +207,9 @@ function CharacterAIAgentSession({
   modelLabel,
   reasoning,
   reasoningLevels,
+  modelSelectionValue,
   modelOptions,
-  onModelIdChange,
+  onModelSelectionChange,
   onReasoningChange,
   onNewChatActionChange,
 }: {
@@ -215,8 +220,9 @@ function CharacterAIAgentSession({
   modelLabel: string;
   reasoning: AIReasoningLevel | undefined;
   reasoningLevels: AIReasoningLevel[];
-  modelOptions: AIModelConfig[];
-  onModelIdChange: (model: string) => void;
+  modelSelectionValue: string;
+  modelOptions: ScopedAIModelOption[];
+  onModelSelectionChange: (value: string) => void;
   onReasoningChange: (reasoning: AIReasoningLevel) => void;
   onNewChatActionChange?: CharacterAIAgentProps["onNewChatActionChange"];
 }) {
@@ -319,9 +325,9 @@ function CharacterAIAgentSession({
       modelLabel={modelLabel}
       reasoning={reasoning}
       reasoningLevels={reasoningLevels}
-      activeModelId={modelConfig.id}
+      modelSelectionValue={modelSelectionValue}
       modelOptions={modelOptions}
-      onModelIdChange={onModelIdChange}
+      onModelSelectionChange={onModelSelectionChange}
       onReasoningChange={onReasoningChange}
       onNewChatActionChange={onNewChatActionChange}
     />
@@ -333,9 +339,9 @@ function CharacterAIAgentChat({
   modelLabel,
   reasoning,
   reasoningLevels,
-  activeModelId,
+  modelSelectionValue,
   modelOptions,
-  onModelIdChange,
+  onModelSelectionChange,
   onReasoningChange,
   onNewChatActionChange,
 }: {
@@ -343,9 +349,9 @@ function CharacterAIAgentChat({
   modelLabel: string;
   reasoning: AIReasoningLevel | undefined;
   reasoningLevels: AIReasoningLevel[];
-  activeModelId: string;
-  modelOptions: AIModelConfig[];
-  onModelIdChange: (model: string) => void;
+  modelSelectionValue: string;
+  modelOptions: ScopedAIModelOption[];
+  onModelSelectionChange: (value: string) => void;
   onReasoningChange: (reasoning: AIReasoningLevel) => void;
   onNewChatActionChange?: CharacterAIAgentProps["onNewChatActionChange"];
 }) {
@@ -689,13 +695,13 @@ function CharacterAIAgentChat({
             </PromptInputTools>
             <div className="flex shrink-0 items-center gap-1">
               <ModelReasoningMenu
-                activeModelId={activeModelId}
+                modelSelectionValue={modelSelectionValue}
                 modelLabel={modelLabel}
                 modelOptions={modelOptions}
                 reasoning={reasoning}
                 reasoningLevels={reasoningLevels}
                 disabled={isBusy}
-                onModelIdChange={onModelIdChange}
+                onModelSelectionChange={onModelSelectionChange}
                 onReasoningChange={onReasoningChange}
               />
               <PromptInputSubmit
@@ -743,32 +749,25 @@ function formatMessageTime(timestamp: number) {
 }
 
 function ModelReasoningMenu({
-  activeModelId,
+  modelSelectionValue,
   modelLabel,
   modelOptions,
   reasoning,
   reasoningLevels,
   disabled,
-  onModelIdChange,
+  onModelSelectionChange,
   onReasoningChange,
 }: {
-  activeModelId: string;
+  modelSelectionValue: string;
   modelLabel: string;
-  modelOptions: AIModelConfig[];
+  modelOptions: ScopedAIModelOption[];
   reasoning: AIReasoningLevel | undefined;
   reasoningLevels: AIReasoningLevel[];
   disabled: boolean;
-  onModelIdChange: (model: string) => void;
+  onModelSelectionChange: (value: string) => void;
   onReasoningChange: (reasoning: AIReasoningLevel) => void;
 }) {
   const modelId = modelLabel.split("/").pop() || modelLabel;
-  const activeConfig = modelOptions.find((model) => model.id === activeModelId);
-  const availableModels = activeConfig?.availableModels ?? [];
-  const selectableModels = availableModels.includes(modelLabel)
-    ? availableModels
-    : [modelLabel, ...availableModels];
-  const modelMenuAlignOffset =
-    reasoningLevels.length > 0 ? -(reasoningLevels.length * 32 + 37) : -4;
 
   return (
     <DropdownMenu dir="rtl">
@@ -815,34 +814,25 @@ function ModelReasoningMenu({
             <DropdownMenuSeparator />
           </>
         )}
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger className="px-2 py-1.5">
-            <span className="min-w-0 flex-1 truncate">{modelId}</span>
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent
-            sideOffset={4}
-            alignOffset={modelMenuAlignOffset}
-            avoidCollisions={false}
-            className="w-72 bg-popover backdrop-blur-md supports-[backdrop-filter]:bg-popover [direction:ltr]"
-          >
-            <DropdownMenuLabel>Model</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={modelLabel}
-              onValueChange={onModelIdChange}
-              className="max-h-56 overflow-y-auto"
+        <DropdownMenuLabel>助手模型</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={modelSelectionValue}
+          onValueChange={onModelSelectionChange}
+          className="max-h-64 overflow-y-auto"
+        >
+          {modelOptions.map((option) => (
+            <DropdownMenuRadioItem
+              key={option.value}
+              value={option.value}
+              className="px-2 py-1.5"
             >
-              {selectableModels.map((model) => (
-                <DropdownMenuRadioItem
-                  key={model}
-                  value={model}
-                  className="px-2 py-1.5"
-                >
-                  <span className="truncate">{model}</span>
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
+              <span className="min-w-0 flex-1 truncate">{option.model}</span>
+              <span className="text-[10px] text-muted-foreground">
+                {AI_PROVIDER_LABELS[option.provider]}
+              </span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

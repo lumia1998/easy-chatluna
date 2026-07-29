@@ -1,20 +1,29 @@
-import { StrictMode } from "react";
+/* eslint-disable react-refresh/only-export-components */
+import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 
 import { ThemeProvider } from "@/components/ui/theme";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { createHashRouter, RouterProvider } from "react-router";
-import ProjectsPage from "./pages/app";
-import HomePage from "./pages/home";
-import ChatPage from "./pages/chat";
-import CharacterEditPage from "./pages/character/page";
-import NotFoundPage from "./pages/not-found";
-import { MainLayout } from "./components/main-layout";
-import { PresetWorkspace } from "./components/preset-workspace";
-
-
-
+import { createHashRouter, Navigate, RouterProvider } from "react-router";
+import {
+    hydrateAIModelConfigSecrets,
+    loadAIModelConfigStore,
+} from "@/lib/ai/model-config";
+const ProjectsPage = lazy(() => import("./pages/app"));
+const HomePage = lazy(() => import("./pages/home"));
+const CharacterEditPage = lazy(() => import("./pages/character/page"));
+const NotFoundPage = lazy(() => import("./pages/not-found"));
+const MainLayout = lazy(() =>
+    import("./components/main-layout").then((module) => ({
+        default: module.MainLayout,
+    })),
+);
+const PresetWorkspace = lazy(() =>
+    import("./components/preset-workspace").then((module) => ({
+        default: module.PresetWorkspace,
+    })),
+);
 const router = createHashRouter([
     {
         path: "/",
@@ -22,7 +31,7 @@ const router = createHashRouter([
     },
     {
         path: "/chat",
-        element: <ChatPage />,
+        element: <Navigate to="/" replace />,
     },
     {
         path: "/create/main",
@@ -51,12 +60,25 @@ const router = createHashRouter([
     },
 ]);
 
-createRoot(document.getElementById("root")!).render(
-    <StrictMode>
-        <ThemeProvider>
-            <TooltipProvider>
-                <RouterProvider router={router}></RouterProvider>
-            </TooltipProvider>
-        </ThemeProvider>
-    </StrictMode>
-);
+void hydrateAIModelConfigSecrets()
+    .catch(() => undefined)
+    .then(() => {
+        loadAIModelConfigStore();
+        createRoot(document.getElementById("root")!).render(
+            <StrictMode>
+                <ThemeProvider>
+                    <TooltipProvider>
+                        <Suspense
+                            fallback={
+                                <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
+                                    正在加载...
+                                </div>
+                            }
+                        >
+                            <RouterProvider router={router}></RouterProvider>
+                        </Suspense>
+                    </TooltipProvider>
+                </ThemeProvider>
+            </StrictMode>
+        );
+    });

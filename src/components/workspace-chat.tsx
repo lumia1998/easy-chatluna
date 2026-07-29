@@ -1,0 +1,332 @@
+"use client";
+
+import { useCallback, useRef, useState } from "react";
+import { generateText } from "ai";
+import {
+  ArrowUp,
+  BookOpen,
+  Bot,
+  ChevronDown,
+  ExternalLink,
+  FileCode2,
+  LoaderCircle,
+  Sparkles,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useModelReasoningLevels } from "@/hooks/use-model-reasoning-levels";
+import { useWorkspaceChat } from "@/hooks/use-preset";
+import { useScopedAIModel } from "@/hooks/use-scoped-ai-model";
+import { createLanguageModelFromConfig } from "@/lib/ai/model-provider";
+import { isAIModelConfigReady } from "@/lib/ai/model-config";
+import {
+  buildChatLunaDocsSystemPrompt,
+  retrieveChatLunaDocs,
+} from "@/lib/docs-rag";
+import { saveWorkspaceChatMessages } from "@/lib/workspace-chat-store";
+import type { WorkspaceChatMessage, WorkspaceChatSource } from "@/lib/database";
+import {
+  AI_PROVIDER_LABELS,
+  AI_REASONING_LABELS,
+  type AIReasoningLevel,
+} from "@/types/ai";
+import { toast } from "sonner";
+
+const CHAT_SYSTEM_PROMPT =
+  "你是 Easy ChatLuna 助手。回答清晰、直接；涉及预设创作时保留用户给出的原始设定，不擅自改写。";
+
+const MODEL_DOCS = [
+  ["接入 ChatGPT", "https://chatluna.chat/guide/configure-model-platform/openai.html"],
+  ["接入 DeepSeek", "https://chatluna.chat/guide/configure-model-platform/deepseek.html"],
+  ["接入 Gemini", "https://chatluna.chat/guide/configure-model-platform/google-gemini.html"],
+  ["接入 Claude", "https://chatluna.chat/guide/configure-model-platform/claude.html"],
+  ["其他模型接入", "https://chatluna.chat/guide/configure-model-platform/introduction.html"],
+] as const;
+
+export function WorkspaceChat({
+  conversationId,
+  onOpenDraft,
+}: {
+  conversationId: string;
+  onOpenDraft: (type: "main" | "character") => void;
+}) {
+  const conversation = useWorkspaceChat(conversationId);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const sendingRef = useRef(false);
+  const [busyPhase, setBusyPhase] = useState<"retrieving" | "generating" | null>(null);
+  const {
+    selectedConfig,
+    selectionValue,
+    options: modelOptions,
+    setSelectionValue,
+    setReasoning,
+  } = useScopedAIModel(`workspace-chat:${conversationId}`);
+  const availableReasoningLevels = useModelReasoningLevels(selectedConfig);
+  const reasoning = selectedConfig
+    ? availableReasoningLevels.includes(selectedConfig.reasoning)
+      ? selectedConfig.reasoning
+      : availableReasoningLevels.includes("medium")
+        ? "medium"
+        : availableReasoningLevels[0]
+    : undefined;
+  const messages = conversation?.messages ?? [];
+
+  const send = useCallback(async () => {
+    const value = input.trim();
+    if (!value || busy || sendingRef.current || !conversation) return;
+    sendingRef.current = true;
+    setBusy(true);
+    const userMessage: WorkspaceChatMessage = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: value,
+    };
+    const history = [...conversation.messages, userMessage];
+    try {
+      if (!(await saveWorkspaceChatMessages(conversation.id, [userMessage]))) {
+        setInput(value);
+        toast.error("消息保存失败，对话可能已被删除");
+        return;
+      }
+      setInput("");
+
+      if (!isAIModelConfigReady(selectedConfig)) {
+        await saveWorkspaceChatMessages(conversation.id, [
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: "请先在设置中配置一个可用模型。",
+          },
+        ]);
+        return;
+      }
+
+      setBusyPhase("retrieving");
+      const retrievalQuery = history
+        .filter((message) => message.role === "user")
+        .slice(-3)
+        .map((message) => message.content)
+        .join("\n");
+      let rag = { context: "", sources: [] as WorkspaceChatSource[], sourceCommit: "" };
+      let retrievalWarning: string | undefined;
+      try {
+        rag = await retrieveChatLunaDocs(retrievalQuery);
+      } catch (error) {
+        retrievalWarning =
+          error instanceof Error ? error.message : "ChatLuna 文档检索失败";
+      }
+
+      setBusyPhase("generating");
+      const result = await generateText({
+        model: createLanguageModelFromConfig(selectedConfig),
+        reasoning,
+        system: `${CHAT_SYSTEM_PROMPT}\n\n${buildChatLunaDocsSystemPrompt(rag)}`,
+        messages: history.map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
+      });
+      await saveWorkspaceChatMessages(conversation.id, [
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: result.text || "模型没有返回内容。",
+          sources: rag.sources,
+          retrievalWarning,
+        },
+      ]);
+    } catch (error) {
+      const saved = await saveWorkspaceChatMessages(conversation.id, [
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: error instanceof Error ? error.message : "请求模型失败。",
+        },
+      ]);
+      if (!saved) setInput(value);
+    } finally {
+      sendingRef.current = false;
+      setBusy(false);
+      setBusyPhase(null);
+    }
+  }, [busy, conversation, input, reasoning, selectedConfig]);
+
+  if (!conversation) {
+    return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">正在加载对话</div>;
+  }
+
+  return (
+    <section className="flex h-full min-h-0 flex-col bg-background">
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-4 py-8 sm:px-7">
+          {messages.length === 0 ? (
+            <div className="my-auto pb-16">
+              <p className="mb-2 text-sm text-muted-foreground">ChatLuna 工作台</p>
+              <h1 className="max-w-2xl text-3xl font-semibold leading-tight sm:text-4xl">
+                你好，今天想创建什么？
+              </h1>
+              <div className="mt-7 flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => onOpenDraft("main")}>
+                  <FileCode2 />创建主插件预设
+                </Button>
+                <Button variant="outline" onClick={() => onOpenDraft("character")}>
+                  <Sparkles />创建伪装预设
+                </Button>
+              </div>
+              <nav className="mt-5 flex max-w-3xl flex-wrap gap-x-5 gap-y-2" aria-label="ChatLuna 快速文档">
+                {MODEL_DOCS.map(([label, href]) => (
+                  <a
+                    key={href}
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground hover:underline"
+                  >
+                    {label}
+                    <ExternalLink className="size-3" />
+                  </a>
+                ))}
+                <a
+                  href="https://chatluna.chat/guide"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+                >
+                  <BookOpen className="size-3.5" />
+                  ChatLuna 文档
+                </a>
+              </nav>
+            </div>
+          ) : (
+            <div className="space-y-7 pb-8">
+              {messages.map((message) => (
+                <article key={message.id} className="grid grid-cols-[28px_minmax(0,1fr)] gap-3">
+                  <div className="flex size-7 items-center justify-center rounded-md border bg-muted/40 text-xs font-medium">
+                    {message.role === "assistant" ? <Bot className="size-3.5" /> : "你"}
+                  </div>
+                  <div className="min-w-0 whitespace-pre-wrap pt-0.5 text-[15px] leading-7">
+                    {message.content}
+                    <SourceList sources={message.sources} />
+                    {message.retrievalWarning && (
+                      <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+                        {message.retrievalWarning}，本次回答未使用文档引用。
+                      </p>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {busy && (
+                <div className="grid grid-cols-[28px_1fr] gap-3 text-muted-foreground">
+                  <div className="flex size-7 items-center justify-center rounded-md border bg-muted/40">
+                    <Bot className="size-3.5" />
+                  </div>
+                  <div className="flex items-center gap-2 pt-1 text-sm">
+                    <LoaderCircle className="size-4 animate-spin" />
+                    {busyPhase === "retrieving" ? "正在检索 ChatLuna 文档" : "正在生成回答"}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </main>
+
+      <div className="shrink-0 bg-background px-3 py-3 sm:px-5">
+        <div className="mx-auto w-full max-w-4xl border-x border-b bg-background">
+          <textarea
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void send();
+              }
+            }}
+            rows={2}
+            placeholder="输入问题、角色设定或你想实现的效果"
+            className="min-h-16 w-full resize-none bg-transparent px-4 py-3 text-sm leading-6 outline-none"
+            aria-label="对话消息"
+          />
+          <div className="flex h-10 items-center justify-between border-t px-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="ghost" size="sm" className="max-w-64 gap-2">
+                  <Bot className="size-4" />
+                  <span className="truncate">{selectedConfig?.model || "选择模型"}</span>
+                  {reasoning && (
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {AI_REASONING_LABELS[reasoning]}
+                    </span>
+                  )}
+                  <ChevronDown className="size-3.5 text-muted-foreground" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-h-[min(32rem,70vh)] w-72 overflow-y-auto">
+                <DropdownMenuLabel>当前会话模型</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={selectionValue}
+                  onValueChange={setSelectionValue}
+                >
+                  {modelOptions.map((option) => (
+                    <DropdownMenuRadioItem key={option.value} value={option.value}>
+                      <span className="min-w-0 flex-1 truncate">{option.model}</span>
+                      <span className="text-xs text-muted-foreground">{AI_PROVIDER_LABELS[option.provider]}</span>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+                {availableReasoningLevels.length > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel>思考等级</DropdownMenuLabel>
+                    <DropdownMenuRadioGroup
+                      value={reasoning}
+                      onValueChange={(value) => setReasoning(value as AIReasoningLevel)}
+                    >
+                      {availableReasoningLevels.map((level) => (
+                        <DropdownMenuRadioItem key={level} value={level}>
+                          {AI_REASONING_LABELS[level]}
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button type="button" size="icon" className="size-8" disabled={!input.trim() || busy} onClick={() => void send()} aria-label="发送" title="发送">
+              <ArrowUp className="size-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SourceList({ sources }: { sources?: WorkspaceChatSource[] }) {
+  if (!sources?.length) return null;
+  return (
+    <div className="mt-4 border-t pt-3 text-sm">
+      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        <BookOpen className="size-3.5" />参考文档
+      </div>
+      <div className="space-y-1.5">
+        {sources.map((source) => (
+          <a key={`${source.index}:${source.sourcePath}:${source.heading}`} href={source.url} target="_blank" rel="noopener noreferrer" className="flex min-w-0 items-start gap-2 text-primary hover:underline">
+            <span className="shrink-0">[{source.index}]</span>
+            <span className="min-w-0 flex-1">{source.title}{source.heading !== source.title ? ` · ${source.heading}` : ""}</span>
+            <ExternalLink className="mt-1 size-3 shrink-0" />
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}

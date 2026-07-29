@@ -104,15 +104,22 @@ function getReasoningLevels(model: ModelsDevModel) {
   return DEFAULT_REASONING_LEVELS.filter((level) => values.has(level));
 }
 
-export function useModelReasoningLevels(config: AIModelConfig) {
-  const model = config.model;
-  const provider = config.provider;
+export function useModelReasoningLevels(config: AIModelConfig | null | undefined) {
+  const model = config?.model ?? "";
+  const provider = config?.provider ?? "openai";
+  const enabled = Boolean(config);
   const [levels, setLevels] = useState<AIReasoningLevel[]>(
-    DEFAULT_REASONING_LEVELS,
+    config ? DEFAULT_REASONING_LEVELS : [],
   );
 
   useEffect(() => {
     let active = true;
+
+    if (!enabled) {
+      return () => {
+        active = false;
+      };
+    }
 
     void loadCatalog()
       .then((catalog) => {
@@ -131,7 +138,7 @@ export function useModelReasoningLevels(config: AIModelConfig) {
     return () => {
       active = false;
     };
-  }, [model, provider]);
+  }, [enabled, model, provider]);
 
-  return levels;
+  return enabled ? levels : [];
 }

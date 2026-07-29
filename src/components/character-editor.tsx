@@ -12,11 +12,10 @@ import { CharacterPresetTemplate, RawPreset } from "@/types/preset";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { Skeleton } from "./ui/skeleton";
-import { Download, Share2, SquarePenIcon } from "lucide-react";
+import { Download, SquarePenIcon } from "lucide-react";
 import { CharacterBasic } from "./character-basic";
 import { CharacterSystem } from "./character-system";
 import { CharacterInput } from "./character-input";
-import { UploadPresetDialog } from "./upload-preset-dialog";
 import {
     Tooltip,
     TooltipContent,
@@ -72,33 +71,43 @@ const AI_TABS = [
     { value: "agent", label: "Agent" },
     { value: "edit", label: "角色设定" },
     { value: "preview", label: "预览" },
+    { value: "versions", label: "版本" },
 ] as const;
 
 interface CharacterEditorProps {
     presetId: string;
+    embedded?: boolean;
 }
 
-export function CharacterEditor({ presetId }: CharacterEditorProps) {
-    return <CharacterEditorInner key={presetId} presetId={presetId} />;
+export function CharacterEditor({ presetId, embedded = false }: CharacterEditorProps) {
+    return <CharacterEditorInner key={presetId} presetId={presetId} embedded={embedded} />;
 }
 
-function CharacterEditorInner({ presetId }: CharacterEditorProps) {
+function CharacterEditorInner({ presetId, embedded = false }: CharacterEditorProps) {
     const preset = usePreset(presetId);
     const updatePreset = usePresetUpdater(presetId);
     const navigate = useNavigate();
     const params = useParams();
+    const [embeddedRoute, setEmbeddedRoute] = useState<{
+        mode: EditorMode;
+        tab: EditorTab;
+    }>({ mode: "edit", tab: "basic" });
 
     const characterPreset =
         preset?.type === "character"
             ? (preset.preset as CharacterPresetTemplate)
             : null;
 
-    const characterDraft = useCharacterAIDraft(characterPreset, updatePreset);
+    const characterDraft = useCharacterAIDraft(
+        characterPreset,
+        updatePreset,
+        400,
+        preset?.activeVersionId,
+    );
     const mainDraft = useMainAIDraft(presetId);
     const characterGeneration = useAIGenerate("character");
     const mainGeneration = useAIGenerate("main");
 
-    const [uploadOpen, setUploadOpen] = useState(false);
     const [canStartNewChat, setCanStartNewChat] = useState(false);
     const newChatActionRef = useRef<(() => void) | null>(null);
     const handleNewChatActionChange = useCallback(
@@ -117,8 +126,8 @@ function CharacterEditorInner({ presetId }: CharacterEditorProps) {
         ? resolveEditorRoute(
               presetId,
               preset.type,
-              params.mode,
-              params.tab,
+              embedded ? embeddedRoute.mode : params.mode,
+              embedded ? embeddedRoute.tab : params.tab,
           )
         : null;
     const presetType = preset?.type;
@@ -128,7 +137,7 @@ function CharacterEditorInner({ presetId }: CharacterEditorProps) {
     const routeTab = route?.tab;
 
     useEffect(() => {
-        if (!routeCanonicalPath || routeIsCanonical) return;
+        if (embedded || !routeCanonicalPath || routeIsCanonical) return;
         const targetPath =
             !params.mode && !params.tab && presetType
                 ? getRememberedCharacterPath(presetId, presetType)
@@ -142,10 +151,11 @@ function CharacterEditorInner({ presetId }: CharacterEditorProps) {
         presetId,
         routeCanonicalPath,
         routeIsCanonical,
+        embedded,
     ]);
 
     useEffect(() => {
-        if (!presetType || !routeIsCanonical || !routeMode || !routeTab) return;
+        if (embedded || !presetType || !routeIsCanonical || !routeMode || !routeTab) return;
         rememberCharacterPath(presetId, presetType, routeMode, routeTab);
     }, [
         presetType,
@@ -153,6 +163,7 @@ function CharacterEditorInner({ presetId }: CharacterEditorProps) {
         routeIsCanonical,
         routeMode,
         routeTab,
+        embedded,
     ]);
 
     if (preset === null) {
@@ -177,6 +188,10 @@ function CharacterEditorInner({ presetId }: CharacterEditorProps) {
     };
 
     const navigateEditor = (mode: EditorMode, tab: EditorTab) => {
+        if (embedded) {
+            setEmbeddedRoute({ mode, tab });
+            return;
+        }
         navigate(buildCharacterPath(presetId, mode, tab, preset.type));
     };
 
@@ -194,17 +209,20 @@ function CharacterEditorInner({ presetId }: CharacterEditorProps) {
 
         if (preset.type === "main") {
             if (mainGeneration.isGenerating) return;
+            const generatedDraft = { ...mainDraft.draft };
             const result = await mainGeneration.generateWithAI(
                 presetId,
-                mainDraft.draft,
+                generatedDraft,
                 mainPresetFormat,
             );
             if (!result) return;
-            mainDraft.markGenerated();
+            mainDraft.markGenerated(generatedDraft);
             return;
         }
 
         if (!characterGeneration.isGenerating) {
+            if (!(await characterDraft.flushPending())) return;
+            const generatedDraft = { ...characterDraft.draft };
             const merged = characterDraft.getMergedCharacterPreset(
                 preset.preset as CharacterPresetTemplate,
             );
@@ -215,7 +233,7 @@ function CharacterEditorInner({ presetId }: CharacterEditorProps) {
                     characterPresetFormat,
                 );
                 if (!result) return;
-                characterDraft.markGenerated();
+                characterDraft.markGenerated(generatedDraft);
             }
         }
     };
@@ -241,6 +259,7 @@ function CharacterEditorInner({ presetId }: CharacterEditorProps) {
         <div
             className={cn(
                 "flex flex-col px-4 sm:px-6 lg:px-8",
+                embedded && "h-full min-h-0 overflow-auto",
                 isAgentTab
                     ? "relative h-[calc(100%-4rem)] min-h-0 overflow-hidden [--agent-header-height:6rem] sm:[--agent-header-height:4rem] md:h-full"
                     : "min-h-full"
@@ -298,28 +317,6 @@ function CharacterEditorInner({ presetId }: CharacterEditorProps) {
                                 </Tooltip>
                             </TooltipProvider>
                         )}
-                        <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        onClick={() => setUploadOpen(true)}
-                                        className="h-8 w-8 p-0"
-                                        aria-label="分享预设"
-                                    >
-                                        <Share2
-                                            className={cn(
-                                                "h-4 w-4 transition-transform duration-200"
-                                            )}
-                                        />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent side="bottom">
-                                    分享预设
-                                </TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
                         <TooltipProvider>
                             <Tooltip>
                                 <TooltipTrigger asChild>
@@ -483,6 +480,7 @@ function CharacterEditorInner({ presetId }: CharacterEditorProps) {
                                     activeTab={activeTab}
                                     presetId={presetId}
                                     presetType="main"
+                                    activeVersionId={preset.activeVersionId}
                                     draft={mainDraft.draft}
                                     setField={mainDraft.setField}
                                     logs={mainGeneration.logs}
@@ -509,6 +507,7 @@ function CharacterEditorInner({ presetId }: CharacterEditorProps) {
                                     activeTab={activeTab}
                                     presetId={presetId}
                                     presetType="character"
+                                    activeVersionId={preset.activeVersionId}
                                     draft={characterDraft.draft}
                                     setField={characterDraft.setField}
                                     logs={characterGeneration.logs}
@@ -541,11 +540,6 @@ function CharacterEditorInner({ presetId }: CharacterEditorProps) {
                     </AnimatePresence>
                 </div>
             </div>
-            <UploadPresetDialog
-                preset={preset}
-                open={uploadOpen}
-                onOpenChange={setUploadOpen}
-            />
         </div>
     );
 }

@@ -6,8 +6,10 @@ import { useNavigate, useSearchParams } from "react-router";
 import {
   ArrowLeft,
   ArrowUp,
+  BookOpen,
   Bot,
   ChevronDown,
+  ExternalLink,
   LoaderCircle,
   Settings2,
 } from "lucide-react";
@@ -25,8 +27,21 @@ import { useAIModelConfigs } from "@/hooks/use-ai-model-configs";
 import { createLanguageModelFromConfig } from "@/lib/ai/model-provider";
 import { isAIModelConfigReady } from "@/lib/ai/model-config";
 import { AI_PROVIDER_LABELS } from "@/types/ai";
+import {
+  buildChatLunaDocsSystemPrompt,
+  retrieveChatLunaDocs,
+  type ChatLunaRagSource,
+} from "@/lib/docs-rag";
 
-type ChatMessage = { role: "user" | "assistant"; content: string };
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  sources?: ChatLunaRagSource[];
+  retrievalWarning?: string;
+};
+
+const CHAT_SYSTEM_PROMPT =
+  "你是 Easy ChatLuna 助手。回答清晰、直接；涉及预设创作时保留用户给出的原始设定，不擅自改写。";
 
 export default function ChatPage() {
   const navigate = useNavigate();
@@ -35,6 +50,9 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
+  const [busyPhase, setBusyPhase] = useState<"retrieving" | "generating" | null>(
+    null,
+  );
   const [initialSent, setInitialSent] = useState(false);
   const { configs, activeConfig, setActiveConfigId, updateConfig } =
     useAIModelConfigs();
@@ -53,6 +71,7 @@ export default function ChatPage() {
     const value = rawValue.trim();
     if (!value || busy) return;
     if (!isAIModelConfigReady(activeConfig)) {
+      setInput("");
       setMessages((current) => [
         ...current,
         { role: "user", content: value },
@@ -66,10 +85,29 @@ export default function ChatPage() {
     setInput("");
     setBusy(true);
     try {
+      setBusyPhase("retrieving");
+      const retrievalQuery = history
+        .filter((message) => message.role === "user")
+        .slice(-3)
+        .map((message) => message.content)
+        .join("\n");
+      let rag = {
+        context: "",
+        sources: [] as ChatLunaRagSource[],
+        sourceCommit: "",
+      };
+      let retrievalWarning: string | undefined;
+      try {
+        rag = await retrieveChatLunaDocs(retrievalQuery);
+      } catch (error) {
+        retrievalWarning =
+          error instanceof Error ? error.message : "ChatLuna 文档检索失败";
+      }
+
+      setBusyPhase("generating");
       const result = await generateText({
         model: createLanguageModelFromConfig(activeConfig),
-        system:
-          "你是 Easy ChatLuna 助手。回答清晰、直接；涉及预设创作时保留用户给出的原始设定，不擅自改写。",
+        system: `${CHAT_SYSTEM_PROMPT}\n\n${buildChatLunaDocsSystemPrompt(rag)}`,
         messages: history.map((message) => ({
           role: message.role,
           content: message.content,
@@ -77,7 +115,12 @@ export default function ChatPage() {
       });
       setMessages((current) => [
         ...current,
-        { role: "assistant", content: result.text || "模型没有返回内容。" },
+        {
+          role: "assistant",
+          content: result.text || "模型没有返回内容。",
+          sources: rag.sources,
+          retrievalWarning,
+        },
       ]);
     } catch (error) {
       setMessages((current) => [
@@ -89,6 +132,7 @@ export default function ChatPage() {
       ]);
     } finally {
       setBusy(false);
+      setBusyPhase(null);
     }
   }, [activeConfig, busy, messages]);
 
@@ -137,6 +181,48 @@ export default function ChatPage() {
                   </div>
                   <div className="whitespace-pre-wrap pt-0.5 text-[15px] leading-7">
                     {message.content}
+                    {message.role === "assistant" && message.sources?.length ? (
+                      <div className="mt-4 border-t pt-3 text-sm">
+                        <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                          <BookOpen className="size-3.5" />
+                          参考文档
+                        </div>
+                        <div className="space-y-1.5">
+                          {message.sources.map((source) => (
+                            <a
+                              key={`${source.index}:${source.sourcePath}:${source.heading}`}
+                              href={source.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex min-w-0 items-start gap-2 text-primary hover:underline"
+                            >
+                              <span className="shrink-0">[{source.index}]</span>
+                              <span className="min-w-0 flex-1">
+                                {source.title}
+                                {source.heading !== source.title
+                                  ? ` · ${source.heading}`
+                                  : ""}
+                              </span>
+                              <ExternalLink className="mt-1 size-3 shrink-0" />
+                            </a>
+                          ))}
+                        </div>
+                        <a
+                          href={message.sources[0].provenanceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          ChatLunaLab/doc · CC BY-SA 4.0
+                          <ExternalLink className="size-3" />
+                        </a>
+                      </div>
+                    ) : null}
+                    {message.role === "assistant" && message.retrievalWarning && (
+                      <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+                        {message.retrievalWarning}，本次回答未使用文档引用。
+                      </p>
+                    )}
                   </div>
                 </article>
               ))}
@@ -145,7 +231,12 @@ export default function ChatPage() {
                   <div className="flex size-7 items-center justify-center rounded-md border bg-muted/40">
                     <Bot className="size-3.5" />
                   </div>
-                  <LoaderCircle className="mt-1.5 size-4 animate-spin" />
+                  <div className="flex items-center gap-2 pt-1 text-sm">
+                    <LoaderCircle className="size-4 animate-spin" />
+                    {busyPhase === "retrieving"
+                      ? "正在检索 ChatLuna 文档"
+                      : "正在生成回答"}
+                  </div>
                 </div>
               )}
             </div>

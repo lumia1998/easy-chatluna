@@ -1,6 +1,6 @@
 # Easy ChatLuna
 
-用于创建、编辑、浏览和分享 ChatLuna 预设的在线工具。
+用于创建、编辑和管理 ChatLuna 预设的在线工具。
 
 本项目基于 [ChatLunaLab/preset-editor](https://github.com/ChatLunaLab/preset-editor)
 开发，并保持对 ChatLuna 预设格式的兼容。
@@ -10,7 +10,6 @@
 - [x] 预设编辑器
 - [x] 预设管理
 - [x] 伪装预设编辑器
-- [x] 预设广场
 
 ## 本地开发
 

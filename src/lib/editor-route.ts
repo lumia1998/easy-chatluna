@@ -8,7 +8,7 @@ export type MainEditTab =
 
 export type CharacterEditTab = "basic" | "system" | "input";
 
-export type AIEditTab = "edit" | "agent" | "preview";
+export type AIEditTab = "edit" | "agent" | "preview" | "versions";
 
 export type EditTab = MainEditTab | CharacterEditTab;
 export type EditorTab = EditTab | AIEditTab;
@@ -28,7 +28,7 @@ const CHARACTER_EDIT_TABS: readonly CharacterEditTab[] = [
   "input",
 ];
 
-const AI_TABS: readonly AIEditTab[] = ["agent", "edit", "preview"];
+const AI_TABS: readonly AIEditTab[] = ["agent", "edit", "preview", "versions"];
 const LAST_EDITOR_PATH_KEY_PREFIX = "preset-editor:last-path:";
 
 function getLastEditorPathKey(presetId: string): string {

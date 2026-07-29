@@ -1,28 +1,13 @@
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-    AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
     Bot,
     Computer,
-    Database,
     Moon,
     Settings,
     Sun,
-    Trash2,
-    Download,
-    Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import {
     Select,
     SelectContent,
@@ -37,7 +22,6 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog";
-import { Separator } from "./ui/separator";
 import { useTheme } from "@/hooks/use-theme";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { AIModelSettings } from "@/components/ai/ai-model-settings";
@@ -51,7 +35,6 @@ interface SettingsCategoryProps {
 const settingsCategories: SettingsCategoryProps[] = [
     { title: "通用", icon: <Settings className="h-4 w-4" />, value: "general" },
     { title: "AI 模型", icon: <Bot className="h-4 w-4" />, value: "ai-model" },
-    { title: "数据管理", icon: <Database className="h-4 w-4" />, value: "data" },
 ];
 
 export function SettingsDialog({
@@ -62,44 +45,8 @@ export function SettingsDialog({
     trigger?: React.ReactNode;
 }) {
     const { theme, setTheme } = useTheme();
-    const fileInputRef = useRef<HTMLInputElement>(null);
     const [selectedCategory, setSelectedCategory] = useState(settingsCategories[0].value);
     const isMobile = useMediaQuery('(max-width: 768px)');
-
-    const handleExportData = () => {
-        const data = {
-            characters: [],
-            settings: {},
-        };
-        const blob = new Blob([JSON.stringify(data, null, 2)], {
-            type: "application/json",
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "character-data.json";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    };
-
-    const handleImportData = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                try {
-                    const data = JSON.parse(e.target?.result as string);
-                    // Handle the imported data here
-                    console.log("Imported data:", data);
-                } catch (error) {
-                    console.error("Error parsing imported data:", error);
-                }
-            };
-            reader.readAsText(file);
-        }
-    };
 
     let categoryContent;
 
@@ -146,68 +93,6 @@ export function SettingsDialog({
             categoryContent = (
                 <div className="ml-1 h-full min-h-0">
                     <AIModelSettings />
-                </div>
-            );
-            break;
-        case "data":
-            categoryContent = (
-                <div className="grid gap-4 ml-3">
-                    <div className="flex items-center justify-between gap-1">
-                        <span className="text-sm">导入数据</span>
-                        <Button
-                           variant="ghost"
-                            size="sm"
-                            onClick={() => fileInputRef.current?.click()}
-                        >
-                            <Upload className="h-4 w-4" />
-                        </Button>
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept=".json"
-                            className="hidden"
-                            onChange={handleImportData}
-                        />
-                    </div>
-                    <Separator />
-                    <div className="flex items-center justify-between gap-4 ">
-                        <span className="text-sm">导出数据</span>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleExportData}
-                        >
-                            <Download className="h-4 w-4" />
-                        </Button>
-                    </div>
-                    <Separator />
-                    <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                            <div className="flex items-center justify-between gap-4">
-                                <span className="text-sm">清除所有数据</span>
-                                <Button variant="destructive" size="sm">
-                                    <Trash2 className="h-4 w-4" />
-                                    
-                                </Button>
-                            </div>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                            <AlertDialogHeader>
-                                <AlertDialogTitle>
-                                    确认清除数据
-                                </AlertDialogTitle>
-                                <AlertDialogDescription>
-                                    此操作将清除所有角色和设置数据。此操作不可撤销，建议在清除前先导出备份。
-                                </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                                <AlertDialogCancel>取消</AlertDialogCancel>
-                                <AlertDialogAction className="bg-destructive hover:bg-destructive/90">
-                                    确认清除
-                                </AlertDialogAction>
-                            </AlertDialogFooter>
-                        </AlertDialogContent>
-                    </AlertDialog>
                 </div>
             );
             break;

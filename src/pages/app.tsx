@@ -7,17 +7,16 @@ import { NewPresetDialog } from "@/components/new-preset-dialog";
 import { useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Import, Share2 } from "lucide-react";
-import { UploadGithubPresetDialog } from "@/components/upload-github-preset-dialog";
+import { Import } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Page() {
     const presets = usePresets();
     const [searchQuery, setSearchQuery] = useState("");
-    const [uploadOpen, setUploadOpen] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleImportData = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const input = event.currentTarget;
         const file = event.target.files?.[0];
         if (file) {
             const reader = new FileReader();
@@ -25,11 +24,17 @@ export default function Page() {
                 try {
                     const data = e.target?.result as string;
                     await importPreset(data);
+                    toast.success("预设已导入");
                 } catch (error) {
                     toast.error("导入失败", {
-                        description: "导入的文件格式不正确",
+                        description:
+                            error instanceof Error
+                                ? error.message
+                                : "导入的文件格式不正确",
                     });
                     console.error(error);
+                } finally {
+                    input.value = "";
                 }
             };
             reader.readAsText(file);
@@ -52,13 +57,6 @@ export default function Page() {
                         <div className="flex justify-end gap-2">
                             <Button
                                 variant="secondary"
-                                onClick={() => setUploadOpen(true)}
-                            >
-                                <Share2 className="h-4 w-4" />
-                                <span className="hidden md:inline">分享预设</span>
-                            </Button>
-                            <Button
-                                variant="secondary"
                                 onClick={() => fileInputRef.current?.click()}
                             >
                                 <Import className="h-4 w-4 md:mr-0" />
@@ -79,7 +77,6 @@ export default function Page() {
                 </div>
                 <CharacterList presets={presets} searchQuery={searchQuery} />
             </div>
-            <UploadGithubPresetDialog open={uploadOpen} onOpenChange={setUploadOpen} />
         </>
     );
 }

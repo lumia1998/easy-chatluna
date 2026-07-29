@@ -3,10 +3,8 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "./ui/switch";
 import {
-    isWorldLoreConfig,
     RawPreset,
     RawWorldLore,
-    WorldLoreConfig,
 } from "@/types/preset";
 import { GetNestedType, NestedKeyOf } from "@/types/util";
 import { Button } from "./ui/button";
@@ -39,12 +37,12 @@ export function CharacterWorldLore({
     const [isRegexMap, setIsRegexMap] = useState<Record<string, boolean>>({});
 
     const WorldLoresItem = (
-        lore: RawWorldLore | WorldLoreConfig,
+        lore: RawWorldLore,
         index: number
     ) => {
         const handleKeywordDelete = (kidx: number) => {
             if (!isWorldLore(lore)) return;
-            const currentKeywords = Array.from(lore.keywords || []);
+            const currentKeywords = normalizeKeywords(lore.keywords);
             currentKeywords.splice(kidx, 1);
             updatePreset?.(`world_lores.${index}.keywords`, currentKeywords);
         };
@@ -57,7 +55,7 @@ export function CharacterWorldLore({
 
         const handleKeywordChange = (value: string, kidx: number) => {
             if (!isWorldLore(lore)) return;
-            const currentKeywords = Array.from(lore.keywords || []);
+            const currentKeywords = normalizeKeywords(lore.keywords);
             const key = `${index}-${kidx}`;
             currentKeywords[kidx] = isRegexMap[key] ? new RegExp(value) : value;
             updatePreset?.(`world_lores.${index}.keywords`, currentKeywords);
@@ -73,7 +71,7 @@ export function CharacterWorldLore({
 
         if (!isWorldLore(lore)) return null;
 
-        const firstKeyword = lore.keywords?.[0];
+        const firstKeyword = normalizeKeywords(lore.keywords)[0];
         const title =
             firstKeyword instanceof RegExp ? firstKeyword.source : firstKeyword;
 
@@ -96,7 +94,7 @@ export function CharacterWorldLore({
                     <div className="space-y-2">
                         <Label>触发关键词</Label>
                         <div className="space-y-2 mt-4">
-                            {Array.from(lore.keywords || []).map(
+                            {normalizeKeywords(lore.keywords).map(
                                 (keyword, kidx) => (
                                     <div
                                         key={kidx}
@@ -163,9 +161,7 @@ export function CharacterWorldLore({
                                 variant="outline"
                                 className="w-full"
                                 onClick={() => {
-                                    const currentKeywords = Array.from(
-                                        lore.keywords || []
-                                    );
+                                    const currentKeywords = normalizeKeywords(lore.keywords);
                                     updatePreset?.(
                                         `world_lores.${index}.keywords`,
                                         [...currentKeywords, ""]
@@ -200,22 +196,20 @@ export function CharacterWorldLore({
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2">
-                        {isWorldLoreConfig(lore) && (
-                            <div className="space-y-2">
-                                <Label>Token 限制</Label>
-                                <Input
-                                    type="number"
-                                    className="mt-4"
-                                    value={lore.tokenLimit || 0}
-                                    onChange={(e) => {
-                                        updatePreset?.(
-                                            `world_lores.${index}.tokenLimit`,
-                                            parseInt(e.target.value)
-                                        );
-                                    }}
-                                />
-                            </div>
-                        )}
+                        <div className="space-y-2">
+                            <Label>Token 限制</Label>
+                            <Input
+                                type="number"
+                                className="mt-4"
+                                value={lore.tokenLimit ?? 0}
+                                onChange={(e) => {
+                                    updatePreset?.(
+                                        `world_lores.${index}.tokenLimit`,
+                                        toFiniteNumber(e.target.value)
+                                    );
+                                }}
+                            />
+                        </div>
 
                         <div className="space-y-2">
                             <Label>扫描深度</Label>
@@ -226,7 +220,7 @@ export function CharacterWorldLore({
                                 onChange={(e) => {
                                     updatePreset?.(
                                         `world_lores.${index}.scanDepth`,
-                                        parseInt(e.target.value)
+                                        toFiniteNumber(e.target.value)
                                     );
                                 }}
                             />
@@ -241,7 +235,21 @@ export function CharacterWorldLore({
                                 onChange={(e) => {
                                     updatePreset?.(
                                         `world_lores.${index}.maxRecursionDepth`,
-                                        parseInt(e.target.value)
+                                        toFiniteNumber(e.target.value)
+                                    );
+                                }}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>排序权重</Label>
+                            <Input
+                                type="number"
+                                className="mt-4"
+                                value={lore.order ?? 0}
+                                onChange={(e) => {
+                                    updatePreset?.(
+                                        `world_lores.${index}.order`,
+                                        toFiniteNumber(e.target.value)
                                     );
                                 }}
                             />
@@ -273,6 +281,12 @@ export function CharacterWorldLore({
                                     <SelectItem value="after_char_defs">
                                         角色定义后
                                     </SelectItem>
+                                    <SelectItem value="before_scenario">
+                                        场景前
+                                    </SelectItem>
+                                    <SelectItem value="after_scenario">
+                                        场景后
+                                    </SelectItem>
                                     <SelectItem value="before_example_messages">
                                         示例消息前
                                     </SelectItem>
@@ -296,6 +310,26 @@ export function CharacterWorldLore({
                                 }}
                             />
                         </div>
+                        {([
+                            ["enabled", "启用条目", lore.enabled ?? true],
+                            ["matchWholeWord", "全词匹配", lore.matchWholeWord ?? false],
+                            ["constant", "始终插入", lore.constant ?? false],
+                            ["caseSensitive", "区分大小写", lore.caseSensitive ?? false],
+                        ] as const).map(([field, label, checked]) => (
+                            <div key={field} className="flex items-baseline justify-between mt-3">
+                                <Label>{label}</Label>
+                                <Switch
+                                    className="mt-4"
+                                    checked={checked}
+                                    onCheckedChange={(value) => {
+                                        updatePreset?.(
+                                            `world_lores.${index}.${field}`,
+                                            value
+                                        );
+                                    }}
+                                />
+                            </div>
+                        ))}
                     </div>
                 </CardContent>
             </Card>
@@ -325,21 +359,29 @@ export function CharacterWorldLore({
                     </Button>
                 </div>
                 <div>
-                    {(preset.world_lores || [])
-                        .sort((a, b) => {
-                            if (isWorldLoreConfig(a) && isWorldLoreConfig(b)) {
-                                return (
-                                    (b as WorldLoreConfig).tokenLimit! -
-                                    (a as WorldLoreConfig).tokenLimit!
-                                );
-                            } else if (isWorldLoreConfig(a) && isWorldLore(b)) {
-                                return -1;
-                            }
-                            return a.content > b.content ? 1 : -1;
-                        })
-                        .map((lore, index) => WorldLoresItem(lore, index))}
+                    {(Array.isArray(preset.world_lores) ? preset.world_lores : [])
+                        .map((lore, originalIndex) => ({ lore, originalIndex }))
+                        .filter((item): item is { lore: RawWorldLore; originalIndex: number } =>
+                            isWorldLore(item.lore)
+                        )
+                        .sort((left, right) =>
+                            (right.lore.order ?? 0) - (left.lore.order ?? 0) ||
+                            left.originalIndex - right.originalIndex
+                        )
+                        .map(({ lore, originalIndex }) =>
+                            WorldLoresItem(lore, originalIndex)
+                        )}
                 </div>
             </div>
         </div>
     );
+}
+
+function normalizeKeywords(keywords: RawWorldLore["keywords"]): (string | RegExp)[] {
+    return typeof keywords === "string" ? [keywords] : [...keywords];
+}
+
+function toFiniteNumber(value: string): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
 }

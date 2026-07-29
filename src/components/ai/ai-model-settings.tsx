@@ -24,7 +24,11 @@ import {
 } from "@/components/ui/tooltip";
 import { useAIModelConfigs } from "@/hooks/use-ai-model-configs";
 import { fetchAIModelIds } from "@/lib/ai/model-list";
-import { AI_PROVIDER_LABELS, type AIProviderFormat } from "@/types/ai";
+import {
+  AI_MODEL_SECRET_PERSISTENCE_ERROR_EVENT,
+  AI_PROVIDER_LABELS,
+  type AIProviderFormat,
+} from "@/types/ai";
 import {
   CircleHelp,
   Eye,
@@ -34,7 +38,7 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 const PROVIDERS: AIProviderFormat[] = ["openai", "anthropic", "google"];
@@ -53,6 +57,22 @@ export function AIModelSettings() {
   const selected =
     configs.find((config) => config.id === editingConfigId) ?? configs[0] ?? null;
   const models = selected?.availableModels ?? [];
+
+  useEffect(() => {
+    const handlePersistenceError = () =>
+      toast.error("API Key 加密保存失败", {
+        description: "请不要刷新页面，检查浏览器存储权限后重试。",
+      });
+    window.addEventListener(
+      AI_MODEL_SECRET_PERSISTENCE_ERROR_EVENT,
+      handlePersistenceError,
+    );
+    return () =>
+      window.removeEventListener(
+        AI_MODEL_SECRET_PERSISTENCE_ERROR_EVENT,
+        handlePersistenceError,
+      );
+  }, []);
 
   const handleFetchModels = async () => {
     if (!selected) {
@@ -183,8 +203,6 @@ export function AIModelSettings() {
                   onChange={(event) => {
                     updateConfig(selected.id, {
                       apiKey: event.target.value,
-                      model: "",
-                      availableModels: [],
                     });
                   }}
                   placeholder="请输入 API Key"
@@ -201,6 +219,9 @@ export function AIModelSettings() {
                   </InputGroupButton>
                 </InputGroupAddon>
               </InputGroup>
+              <p className="text-xs leading-5 text-muted-foreground">
+                API Key 会在此浏览器中加密保存，刷新、切换标签页或重新打开后仍可使用。
+              </p>
             </div>
 
             <div className="grid gap-2">

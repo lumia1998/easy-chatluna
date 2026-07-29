@@ -2,13 +2,18 @@ const SENSITIVE_KEYS = new Set([
   "api_url",
   "api_token",
   "api_key",
-  "apiKey",
+  "api-key",
+  "apikey",
   "token",
   "model",
+  "authorization",
+  "password",
+  "access_token",
+  "base_url",
 ]);
 
 export function isSensitivePresetKey(key: string): boolean {
-  return SENSITIVE_KEYS.has(key);
+  return SENSITIVE_KEYS.has(key.toLowerCase());
 }
 
 /**

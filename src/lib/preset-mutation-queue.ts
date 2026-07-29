@@ -1,18 +1,25 @@
 import { type PresetModel } from "@/lib/database";
-import { getPreset, withPresetTransaction } from "@/lib/preset-store";
+import {
+  deletePreset,
+  getPreset,
+  restorePresetVersionTransaction,
+  withPresetTransaction,
+} from "@/lib/preset-store";
+import type { PresetVersionSource } from "@/lib/database";
 
 const queues = new Map<string, Promise<unknown>>();
 
 function enqueue<T>(presetId: string, task: () => Promise<T>): Promise<T> {
   const previous = queues.get(presetId) ?? Promise.resolve();
   const next = previous.catch(() => undefined).then(task);
-  queues.set(
-    presetId,
-    next.then(
-      () => undefined,
-      () => undefined,
-    ),
+  const settled = next.then(
+    () => undefined,
+    () => undefined,
   );
+  queues.set(presetId, settled);
+  void settled.finally(() => {
+    if (queues.get(presetId) === settled) queues.delete(presetId);
+  });
   return next;
 }
 
@@ -47,6 +54,10 @@ export interface PresetMutatorOutput {
 export async function mutatePreset(
   presetId: string,
   mutator: (latest: PresetModel) => PresetMutatorOutput,
+  options: {
+    expectedRevision?: number;
+    version?: { label: string; source: PresetVersionSource };
+  } = {},
 ): Promise<PresetMutationResult> {
   return enqueue(presetId, async () => {
     let meta: Omit<
@@ -54,16 +65,20 @@ export async function mutatePreset(
       "preset"
     > | null = null;
 
-    const stored = await withPresetTransaction(presetId, (latest) => {
-      const output = mutator(latest);
-      meta = {
-        changedFields: output.changedFields,
-        message: output.message,
-        warnings: output.warnings,
-        generateArtifact: output.generateArtifact,
-      };
-      return output.preset;
-    });
+    const stored = await withPresetTransaction(
+      presetId,
+      (latest) => {
+        const output = mutator(latest);
+        meta = {
+          changedFields: output.changedFields,
+          message: output.message,
+          warnings: output.warnings,
+          generateArtifact: output.generateArtifact,
+        };
+        return output.preset;
+      },
+      options,
+    );
 
     if (!meta) {
       throw new Error("内部错误：mutation 未产生结果");
@@ -85,6 +100,28 @@ export async function mutatePreset(
         : {}),
     };
   });
+}
+
+export function restorePresetVersion(
+  presetId: string,
+  versionId: string,
+): Promise<PresetModel> {
+  return enqueue(presetId, () =>
+    restorePresetVersionTransaction(presetId, versionId),
+  );
+}
+
+export async function deletePresetAndData(presetId: string): Promise<void> {
+  const { disposeAgentChatSessionsForPreset } = await import(
+    "@/lib/ai/agent-chat-session-manager"
+  );
+  await disposeAgentChatSessionsForPreset(presetId);
+  await enqueue(presetId, () => deletePreset(presetId));
+  try {
+    localStorage.removeItem(`chatluna_main_ai_draft:${presetId}`);
+  } catch {
+    // Storage cleanup is best-effort after the database transaction succeeds.
+  }
 }
 
 export async function readPresetOrThrow(presetId: string): Promise<PresetModel> {

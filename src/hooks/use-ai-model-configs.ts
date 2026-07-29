@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   createAIModelConfig,
   getActiveAIModelConfig,
+  hydrateAIModelConfigSecrets,
   isAIModelConfigReady,
   loadAIModelConfigStore,
   resolveActiveConfigId,
@@ -17,6 +18,7 @@ import type {
 } from "@/types/ai";
 import {
   AI_MODEL_CONFIG_CHANGE_EVENT,
+  AI_MODEL_CONFIG_ENCRYPTED_SECRET_STORAGE_KEY,
   AI_MODEL_CONFIG_STORAGE_KEY,
 } from "@/types/ai";
 
@@ -38,6 +40,9 @@ export function useAIModelConfigs() {
     const handleConfigChange = () => reload();
     const handleStorage = (event: StorageEvent) => {
       if (event.key === AI_MODEL_CONFIG_STORAGE_KEY) reload();
+      if (event.key === AI_MODEL_CONFIG_ENCRYPTED_SECRET_STORAGE_KEY) {
+        void hydrateAIModelConfigSecrets().then(reload);
+      }
     };
 
     window.addEventListener(AI_MODEL_CONFIG_CHANGE_EVENT, handleConfigChange);

@@ -1,17 +1,23 @@
+import { isCharacterPresetTemplate, isRawPreset } from "@/types/preset";
 import {
-  CharacterPresetTemplate,
-  isCharacterPresetTemplate,
-  isRawPreset,
-  RawPreset,
-} from "@/types/preset";
-import { db, type PresetModel } from "@/lib/database";
+  db,
+  type PresetModel,
+  type PresetVersionModel,
+  type PresetVersionSource,
+} from "@/lib/database";
 
 export async function createPreset<
   T extends "main" | "character" = "main" | "character",
->(model: Omit<PresetModel<T>, "lastModified" | "id">) {
+>(
+  model: Omit<
+    PresetModel<T>,
+    "lastModified" | "revision" | "activeVersionId" | "id"
+  >,
+) {
   const id = crypto.randomUUID();
   await db.presets.add({
     lastModified: Date.now(),
+    revision: 1,
     ...model,
     id,
   });
@@ -37,6 +43,7 @@ export async function createMainPreset(name: string) {
 }
 
 export async function createCharacterPreset(name: string) {
+  const xmlName = escapeXmlAttribute(name);
   return createPreset({
     name,
     type: "character",
@@ -88,7 +95,7 @@ export async function createCharacterPreset(name: string) {
     </think>
 
     <message_part>
-     <message name='${name}' id='0' type='text' sticker='表情包类型'>回复内容（40字内）</message>
+     <message name='${xmlName}' id='0' type='text' sticker='表情包类型'>回复内容（40字内）</message>
     </message_part>`,
       system: `你现在正在QQ群聊中和群友聊天，你是一个普通的群友。你的网名是${name}，请根据以下信息进行角色扮演：
 
@@ -180,7 +187,7 @@ export async function createCharacterPreset(name: string) {
 
 
      回复格式: {{
-         基本格式: "<message name='${name}' id='0' type='type' sticker='sticker'>content</message>"
+         基本格式: "<message name='${xmlName}' id='0' type='type' sticker='sticker'>content</message>"
 
          类型: [
            text: 文本消息
@@ -193,11 +200,11 @@ export async function createCharacterPreset(name: string) {
          }}
 
          示例: {{
-             普通回复: "<message name='${name}' id='0' type='text' sticker='表情包类型'>回复内容</message>",
-             At回复: "<message name='${name}' id='0' type='text' sticker='表情包类型'><at name='用户'>123</at>回复内容</message>",
-             带颜文字: "<message name='${name}' id='0' type='text' sticker='表情包类型'><pre>(づ｡◕‿‿◕｡)づ</pre> 回复内容 <pre>(✿◠‿◠)</pre></message>",
-             语音回复: "<message name='${name}' id='0' type='voice' sticker='表情包类型'>语音内容</message>",
-             无需回复: "<message name='${name}' id='0' type='text' sticker='表情包类型'></message>"
+             普通回复: "<message name='${xmlName}' id='0' type='text' sticker='表情包类型'>回复内容</message>",
+             At回复: "<message name='${xmlName}' id='0' type='text' sticker='表情包类型'><at name='用户'>123</at>回复内容</message>",
+             带颜文字: "<message name='${xmlName}' id='0' type='text' sticker='表情包类型'><pre>(づ｡◕‿‿◕｡)づ</pre> 回复内容 <pre>(✿◠‿◠)</pre></message>",
+             语音回复: "<message name='${xmlName}' id='0' type='voice' sticker='表情包类型'>语音内容</message>",
+             无需回复: "<message name='${xmlName}' id='0' type='text' sticker='表情包类型'></message>"
          }}
 
          注意事项: {{
@@ -223,11 +230,25 @@ export async function createCharacterPreset(name: string) {
 export async function withPresetTransaction(
   id: string,
   mutator: (latest: PresetModel) => PresetModel["preset"] | PresetModel,
+  options: {
+    expectedRevision?: number;
+    version?: {
+      label: string;
+      source: PresetVersionSource;
+    };
+  } = {},
 ): Promise<PresetModel> {
-  return db.transaction("rw", db.presets, async () => {
+  return db.transaction("rw", db.presets, db.presetVersions, async () => {
     const latest = await db.presets.get(id);
     if (!latest) {
       throw new Error(`预设不存在：${id}`);
+    }
+    const currentRevision = latest.revision ?? 1;
+    if (
+      options.expectedRevision !== undefined &&
+      currentRevision !== options.expectedRevision
+    ) {
+      throw new Error("生成期间预设已变化，未应用过期结果");
     }
 
     const result = mutator(latest);
@@ -240,27 +261,37 @@ export async function withPresetTransaction(
         ? (result as PresetModel).preset
         : (result as PresetModel["preset"]);
 
-    let name: string;
-    if (latest.type === "main") {
-      if (!isRawPreset(nextPresetData)) {
-        throw new Error("主插件预设写入了不匹配的数据结构");
+    let generatedVersionId: string | undefined;
+    if (options.version) {
+      const versionCount = await db.presetVersions
+        .where("presetId")
+        .equals(id)
+        .count();
+      if (versionCount === 0) {
+        await db.presetVersions.add(
+          createVersionRecord(latest, "首次生成前", "initial"),
+        );
       }
-      name = nextPresetData.keywords?.[0] || latest.name;
-    } else {
-      if (!isCharacterPresetTemplate(nextPresetData)) {
-        throw new Error("伪装预设写入了不匹配的数据结构");
-      }
-      name = nextPresetData.name || latest.name;
+      generatedVersionId = crypto.randomUUID();
     }
-    const lastModified = Date.now();
-    const nextModel: PresetModel = {
-      ...latest,
-      name,
-      preset: nextPresetData,
-      lastModified,
-    };
+
+    const nextModel = createNextPresetModel(
+      latest,
+      nextPresetData,
+      generatedVersionId,
+    );
 
     await db.presets.put(nextModel);
+    if (options.version && generatedVersionId) {
+      await db.presetVersions.add(
+        createVersionRecord(
+          nextModel,
+          options.version.label,
+          options.version.source,
+          generatedVersionId,
+        ),
+      );
+    }
     const stored = await db.presets.get(id);
     if (!stored) {
       throw new Error(`预设写入后丢失：${id}`);
@@ -269,17 +300,111 @@ export async function withPresetTransaction(
   });
 }
 
+function escapeXmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/'/g, "&apos;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+export async function restorePresetVersionTransaction(
+  presetId: string,
+  versionId: string,
+): Promise<PresetModel> {
+  return db.transaction("rw", db.presets, db.presetVersions, async () => {
+    const [latest, version] = await Promise.all([
+      db.presets.get(presetId),
+      db.presetVersions.get(versionId),
+    ]);
+    if (!latest) throw new Error(`预设不存在：${presetId}`);
+    if (!version || version.presetId !== presetId) {
+      throw new Error("版本不存在或不属于当前预设");
+    }
+    if (version.presetType !== latest.type) {
+      throw new Error("版本类型与当前预设不匹配");
+    }
+
+    if (!latest.activeVersionId) {
+      await db.presetVersions.add(
+        createVersionRecord(latest, "切换前快照", "restore-point"),
+      );
+    }
+
+    const nextModel = createNextPresetModel(
+      latest,
+      version.preset,
+      version.id,
+    );
+    await db.presets.put(nextModel);
+    return nextModel;
+  });
+}
+
+function createNextPresetModel(
+  latest: PresetModel,
+  nextPresetData: PresetModel["preset"],
+  activeVersionId?: string,
+): PresetModel {
+  let name: string;
+  if (latest.type === "main") {
+    if (!isRawPreset(nextPresetData)) {
+      throw new Error("主插件预设写入了不匹配的数据结构");
+    }
+    name = nextPresetData.keywords[0] || latest.name;
+  } else {
+    if (!isCharacterPresetTemplate(nextPresetData)) {
+      throw new Error("伪装预设写入了不匹配的数据结构");
+    }
+    name = nextPresetData.name || latest.name;
+  }
+
+  return {
+    ...latest,
+    name,
+    preset: nextPresetData,
+    revision: (latest.revision ?? 1) + 1,
+    lastModified: Math.max(Date.now(), latest.lastModified + 1),
+    activeVersionId,
+  };
+}
+
+function createVersionRecord(
+  model: PresetModel,
+  label: string,
+  source: PresetVersionSource,
+  id: string = crypto.randomUUID(),
+): PresetVersionModel {
+  return {
+    id,
+    presetId: model.id,
+    presetType: model.type,
+    name: model.name,
+    label,
+    source,
+    createdAt: Date.now(),
+    revision: model.revision ?? 1,
+    preset: model.preset,
+  };
+}
+
 export async function deletePreset(id: string) {
-  return await db.presets.delete(id);
+  return db.transaction(
+    "rw",
+    db.presets,
+    db.agentChats,
+    db.presetVersions,
+    async () => {
+      await Promise.all([
+        db.presets.delete(id),
+        db.agentChats.delete(`main:${id}`),
+        db.agentChats.delete(`character:${id}`),
+        db.presetVersions.where("presetId").equals(id).delete(),
+      ]);
+    },
+  );
 }
 
 export function getPreset(id: string) {
   return db.presets.get(id);
-}
-
-export function getPresetDisplayName(preset: PresetModel) {
-  if (preset.type === "character") {
-    return (preset.preset as CharacterPresetTemplate).name;
-  }
-  return (preset.preset as RawPreset).keywords?.[0] ?? preset.name;
 }

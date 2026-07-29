@@ -33,11 +33,13 @@ import {
 import { CircleHelp, TriangleAlert } from "lucide-react";
 import { dump } from "js-yaml";
 import type { TemplateEditorContext } from "@/lib/prompt-template";
+import { PresetVersionHistory } from "./preset-version-history";
 
 interface CharacterAIContentProps<T extends AIPresetFormat> {
   activeTab: string;
   presetId: string;
   presetType: "main" | "character";
+  activeVersionId?: string;
   draft: AIRoleDraftFields;
   setField: (key: CharacterAIDraftKey, value: string) => void;
   logs: AIGenerateLogEntry[];
@@ -61,6 +63,7 @@ export function CharacterAIContent<T extends AIPresetFormat>({
   activeTab,
   presetId,
   presetType,
+  activeVersionId,
   draft,
   setField,
   logs,
@@ -111,6 +114,13 @@ export function CharacterAIContent<T extends AIPresetFormat>({
           preset={preset}
           previewContext={previewContext}
           hasPendingRoleChanges={hasPendingRoleChanges}
+        />
+      )}
+      {tab === "versions" && (
+        <PresetVersionHistory
+          presetId={presetId}
+          presetType={presetType}
+          activeVersionId={activeVersionId}
         />
       )}
     </div>

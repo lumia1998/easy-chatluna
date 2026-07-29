@@ -28,14 +28,15 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useMemo, useState } from "react";
 import type { PresetModel } from "@/lib/database";
-import { deletePreset, getPreset } from "@/lib/preset-store";
+import { getPreset } from "@/lib/preset-store";
+import { deletePresetAndData } from "@/lib/preset-mutation-queue";
 import { exportPreset } from "@/lib/preset-io";
 import { Link, useNavigate } from "react-router";
-import { UploadPresetDialog } from "@/components/upload-preset-dialog";
 import {
   forgetRememberedCharacterPath,
   getRememberedCharacterPath,
 } from "@/lib/editor-route";
+import { toast } from "sonner";
 
 interface CharacterListProps {
   presets: PresetModel[];
@@ -54,8 +55,6 @@ export function CharacterList({
   const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(
     null,
   );
-  const [uploadPreset, setUploadPreset] = useState<PresetModel | null>(null);
-  const [uploadOpen, setUploadOpen] = useState(false);
   const navigate = useNavigate();
 
   const characters = useMemo(() => {
@@ -218,14 +217,6 @@ export function CharacterList({
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={() => {
-                          setUploadPreset(character);
-                          setUploadOpen(true);
-                        }}
-                      >
-                        分享
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => {
                           setSelectedCharacterId(character.id);
                           setOpenAlert(true);
                         }}
@@ -259,10 +250,18 @@ export function CharacterList({
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={async () => {
-                await deletePreset(selectedCharacterId!);
-                forgetRememberedCharacterPath(selectedCharacterId!);
-                setOpenAlert(false);
-                setSelectedCharacterId(null);
+                try {
+                  await deletePresetAndData(selectedCharacterId!);
+                  forgetRememberedCharacterPath(selectedCharacterId!);
+                  setOpenAlert(false);
+                  setSelectedCharacterId(null);
+                  toast.success("预设已删除");
+                } catch (error) {
+                  toast.error("删除失败", {
+                    description:
+                      error instanceof Error ? error.message : "未知错误",
+                  });
+                }
               }}
             >
               确认
@@ -270,18 +269,6 @@ export function CharacterList({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      {uploadPreset && (
-        <UploadPresetDialog
-          preset={uploadPreset}
-          open={uploadOpen}
-          onOpenChange={(nextOpen) => {
-            setUploadOpen(nextOpen);
-            if (!nextOpen) {
-              setUploadPreset(null);
-            }
-          }}
-        />
-      )}
     </div>
   );
 }

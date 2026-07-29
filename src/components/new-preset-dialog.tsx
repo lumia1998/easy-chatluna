@@ -1,6 +1,5 @@
 import {
     Dialog,
-    DialogClose,
     DialogContent,
     DialogHeader,
     DialogTitle,
@@ -23,27 +22,37 @@ import {
 } from "@/lib/preset-store";
 
 export function NewPresetDialog() {
+    const [open, setOpen] = useState(false);
     const [name, setName] = useState("");
     const [type, setType] = useState("main");
     const [error, setError] = useState("");
+    const [creating, setCreating] = useState(false);
 
-    const handleCreatePreset = async (e: React.MouseEvent) => {
+    const handleCreatePreset = async () => {
         if (!name.trim()) {
             setError("请输入预设名称");
-            e.preventDefault();
             return;
         }
 
         setError("");
-
-        if (type === "main") {
-            await createMainPreset(name);
-        } else {
-            await createCharacterPreset(name);
+        setCreating(true);
+        try {
+            if (type === "main") {
+                await createMainPreset(name.trim());
+            } else {
+                await createCharacterPreset(name.trim());
+            }
+            setName("");
+            setType("main");
+            setOpen(false);
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : "创建预设失败");
+        } finally {
+            setCreating(false);
         }
     };
     return (
-        <Dialog>
+        <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
                 <Button variant="default" className="flex-1 md:flex-none">
                     <Plus className="w-4 h-4 md:mr-0 md:w-auto md:h-auto" />
@@ -94,9 +103,9 @@ export function NewPresetDialog() {
                         </Select>
                     </div>
                 </div>
-                <DialogClose asChild>
-                    <Button onClick={handleCreatePreset}>创建</Button>
-                </DialogClose>
+                <Button onClick={handleCreatePreset} disabled={creating}>
+                    {creating ? "创建中..." : "创建"}
+                </Button>
             </DialogContent>
         </Dialog>
     );

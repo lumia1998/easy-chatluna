@@ -115,6 +115,7 @@ export async function generateMainPreset(
     model: modelConfig,
     format,
     roleDraft: draft,
+    expectedRevision: latest.revision ?? 1,
   });
 
   const prompt = buildMainGenerateUserPrompt(draft, current.keywords, format);
@@ -161,6 +162,7 @@ export async function generateCharacterPreset(
     model: modelConfig,
     format,
     roleDraft: toAIRoleDraftFields(draft),
+    expectedRevision: latest.revision ?? 1,
   });
 
   const prompt = buildCharacterGenerateUserPrompt(draft, format);

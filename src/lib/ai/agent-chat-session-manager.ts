@@ -42,6 +42,7 @@ export interface AgentChatSession {
   scheduleSave: (messages: UIMessage[]) => void;
   flushSave: (messages: UIMessage[]) => Promise<void>;
   clear: () => Promise<void>;
+  dispose: () => Promise<void>;
   isBusy: () => boolean;
   enqueueInterjection: (text: string, createdAt: number) => void;
   getInterjections: () => AgentChatInterjection[];
@@ -52,6 +53,7 @@ export interface AgentChatSession {
 
 const sessions = new Map<string, AgentChatSession>();
 const creating = new Map<string, Promise<AgentChatSession>>();
+const sessionGenerations = new Map<string, number>();
 
 export function getAgentChatSessionId(
   presetType: AgentChatPresetType,
@@ -472,10 +474,12 @@ class SessionPersistence {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingMessages: UIMessage[] | null = null;
   private pendingRevision = 0;
+  private disposed = false;
 
   constructor(private readonly sessionId: string) {}
 
   scheduleSave(messages: UIMessage[]) {
+    if (this.disposed) return;
     this.pendingMessages = snapshotPersistableMessages(messages);
     this.pendingRevision = this.revision;
 
@@ -497,6 +501,7 @@ class SessionPersistence {
   }
 
   flush(messages: UIMessage[]) {
+    if (this.disposed) return Promise.resolve();
     this.cancelDebounce();
     return this.enqueuePersist(
       snapshotPersistableMessages(messages),
@@ -505,6 +510,7 @@ class SessionPersistence {
   }
 
   clear() {
+    if (this.disposed) return Promise.resolve();
     this.cancelDebounce();
     this.revision += 1;
     const revision = this.revision;
@@ -512,6 +518,13 @@ class SessionPersistence {
       if (revision !== this.revision) return;
       await db.agentChats.delete(this.sessionId);
     });
+  }
+
+  dispose() {
+    this.cancelDebounce();
+    this.disposed = true;
+    this.revision += 1;
+    return this.writeChain;
   }
 
   private cancelDebounce() {
@@ -524,17 +537,24 @@ class SessionPersistence {
 
   private enqueuePersist(messages: UIMessage[], revision: number) {
     return this.enqueue(async () => {
-      if (revision !== this.revision) return;
+      if (this.disposed || revision !== this.revision) return;
 
       if (messages.length === 0) {
         await db.agentChats.delete(this.sessionId);
         return;
       }
 
-      await db.agentChats.put({
-        id: this.sessionId,
-        messages,
-        updatedAt: Date.now(),
+      const presetId = this.sessionId.slice(this.sessionId.indexOf(":") + 1);
+      await db.transaction("rw", db.presets, db.agentChats, async () => {
+        if (!(await db.presets.get(presetId))) {
+          await db.agentChats.delete(this.sessionId);
+          return;
+        }
+        await db.agentChats.put({
+          id: this.sessionId,
+          messages,
+          updatedAt: Date.now(),
+        });
       });
     });
   }
@@ -612,6 +632,7 @@ async function createAgentChatSession(
     humanLoop,
   });
   const persistence = new SessionPersistence(sessionId);
+  let disposed = false;
   if (record && initialMessages.length !== storedMessages.length) {
     void persistence.flush(initialMessages).catch(handleAgentChatPersistenceError);
   }
@@ -623,6 +644,7 @@ async function createAgentChatSession(
     transport,
     // Single settlement path for success / abort / error (AI SDK always calls onFinish).
     onFinish: ({ message, messages, isAbort, isError }) => {
+      if (disposed) return;
       const completedMessage = buildCompletedAssistantMessage(
         message,
         messages,
@@ -691,6 +713,12 @@ async function createAgentChatSession(
       await persistence.clear();
       chat.messages = [];
     },
+    dispose: async () => {
+      disposed = true;
+      humanLoop.clear();
+      await chat.stop();
+      await persistence.dispose();
+    },
     isBusy: () => {
       const status = chat.status;
       return status === "submitted" || status === "streaming";
@@ -702,7 +730,6 @@ async function createAgentChatSession(
     subscribeInterjections: (listener) => humanLoop.subscribe(listener),
   };
 
-  sessions.set(sessionId, session);
   return session;
 }
 
@@ -718,6 +745,7 @@ export async function getOrCreateAgentChatSession(
     return existing;
   }
 
+  const generation = sessionGenerations.get(sessionId) ?? 0;
   let pending = creating.get(sessionId);
   if (!pending) {
     pending = createAgentChatSession(
@@ -732,6 +760,34 @@ export async function getOrCreateAgentChatSession(
   }
 
   const session = await pending;
+  if ((sessionGenerations.get(sessionId) ?? 0) !== generation) {
+    await session.dispose();
+    throw new Error("预设已删除，会话已释放");
+  }
+  sessions.set(sessionId, session);
   session.updateRuntime(runtime);
   return session;
+}
+
+export async function disposeAgentChatSessionsForPreset(
+  presetId: string,
+): Promise<void> {
+  const sessionIds = [
+    getAgentChatSessionId("main", presetId),
+    getAgentChatSessionId("character", presetId),
+  ];
+  const pendingSessions: Promise<unknown>[] = [];
+  for (const sessionId of sessionIds) {
+    sessionGenerations.set(
+      sessionId,
+      (sessionGenerations.get(sessionId) ?? 0) + 1,
+    );
+    const session = sessions.get(sessionId);
+    if (session) pendingSessions.push(session.dispose());
+    const pending = creating.get(sessionId);
+    if (pending) pendingSessions.push(pending.catch(() => undefined));
+    sessions.delete(sessionId);
+    creating.delete(sessionId);
+  }
+  await Promise.allSettled(pendingSessions);
 }
