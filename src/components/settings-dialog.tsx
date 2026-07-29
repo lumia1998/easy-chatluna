@@ -54,7 +54,13 @@ const settingsCategories: SettingsCategoryProps[] = [
     { title: "数据管理", icon: <Database className="h-4 w-4" />, value: "data" },
 ];
 
-export function SettingsDialog({ compact = false }: { compact?: boolean }) {
+export function SettingsDialog({
+    compact = false,
+    trigger,
+}: {
+    compact?: boolean;
+    trigger?: React.ReactNode;
+}) {
     const { theme, setTheme } = useTheme();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [selectedCategory, setSelectedCategory] = useState(settingsCategories[0].value);
@@ -213,18 +219,20 @@ export function SettingsDialog({ compact = false }: { compact?: boolean }) {
     return (
         <Dialog>
             <DialogTrigger asChild>
-                <Button
-                    variant="ghost"
-                    aria-label={compact ? "设置" : undefined}
-                    title={compact ? "设置" : undefined}
-                    className={cn(
-                        "w-full justify-start gap-3 px-4 h-11 rounded-t-lg rounded-b-none border-t hover:bg-primary/5",
-                        compact && "justify-center gap-0 px-0"
-                    )}
-                >
-                    <Settings className="size-5 shrink-0" />
-                    <span className={cn(compact && "sr-only")}>设置</span>
-                </Button>
+                {trigger ?? (
+                    <Button
+                        variant="ghost"
+                        aria-label={compact ? "设置" : undefined}
+                        title={compact ? "设置" : undefined}
+                        className={cn(
+                            "w-full justify-start gap-3 px-4 h-11 rounded-t-lg rounded-b-none border-t hover:bg-primary/5",
+                            compact && "justify-center gap-0 px-0"
+                        )}
+                    >
+                        <Settings className="size-5 shrink-0" />
+                        <span className={cn(compact && "sr-only")}>设置</span>
+                    </Button>
+                )}
             </DialogTrigger>
             <DialogContent className={cn(
                 "w-[calc(100%-2rem)] max-w-none rounded-2xl sm:max-w-[800px]",

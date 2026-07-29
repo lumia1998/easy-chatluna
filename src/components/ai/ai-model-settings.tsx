@@ -2,14 +2,6 @@
 
 import { Button } from "@/components/ui/button";
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
@@ -34,8 +26,6 @@ import { useAIModelConfigs } from "@/hooks/use-ai-model-configs";
 import { fetchAIModelIds } from "@/lib/ai/model-list";
 import { AI_PROVIDER_LABELS, type AIProviderFormat } from "@/types/ai";
 import {
-  Check,
-  ChevronsUpDown,
   CircleHelp,
   Eye,
   EyeOff,
@@ -44,7 +34,6 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react";
-import { Popover as PopoverPrimitive } from "radix-ui";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -53,27 +42,17 @@ const PROVIDERS: AIProviderFormat[] = ["openai", "anthropic", "google"];
 export function AIModelSettings() {
   const {
     configs,
-    activeConfigId,
-    activeConfig,
     addConfig,
     deleteConfig,
     updateConfig,
-    setActiveConfigId,
   } = useAIModelConfigs();
   const [showApiKey, setShowApiKey] = useState(false);
   const [loadingConfigId, setLoadingConfigId] = useState<string | null>(null);
-  const [modelPickerConfigId, setModelPickerConfigId] = useState<string | null>(
-    null,
-  );
+  const [editingConfigId, setEditingConfigId] = useState<string | null>(null);
 
-  const selected = activeConfig ?? configs[0] ?? null;
+  const selected =
+    configs.find((config) => config.id === editingConfigId) ?? configs[0] ?? null;
   const models = selected?.availableModels ?? [];
-
-  const clearModelOptions = (configId: string) => {
-    if (modelPickerConfigId === configId) {
-      setModelPickerConfigId(null);
-    }
-  };
 
   const handleFetchModels = async () => {
     if (!selected) {
@@ -88,7 +67,6 @@ export function AIModelSettings() {
         toast.warning("接口未返回可用模型");
       } else {
         toast.success("模型列表已更新");
-        setModelPickerConfigId(selected.id);
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "拉取模型失败");
@@ -106,7 +84,7 @@ export function AIModelSettings() {
           size="sm"
           variant="secondary"
           className="shrink-0 gap-1"
-          onClick={() => addConfig("openai")}
+          onClick={() => setEditingConfigId(addConfig("openai"))}
         >
           <Plus className="h-4 w-4" />
           新增
@@ -124,8 +102,8 @@ export function AIModelSettings() {
               <Label>配置</Label>
               <div className="flex gap-2">
                 <Select
-                  value={activeConfigId ?? selected.id}
-                  onValueChange={setActiveConfigId}
+                  value={selected.id}
+                  onValueChange={setEditingConfigId}
                 >
                   <SelectTrigger className="min-w-0 flex-1">
                     <SelectValue />
@@ -145,7 +123,13 @@ export function AIModelSettings() {
                   className="shrink-0 text-destructive hover:text-destructive"
                   aria-label="删除配置"
                   title="删除配置"
-                  onClick={() => deleteConfig(selected.id)}
+                  onClick={() => {
+                    const nextConfig = configs.find(
+                      (config) => config.id !== selected.id,
+                    );
+                    setEditingConfigId(nextConfig?.id ?? null);
+                    deleteConfig(selected.id);
+                  }}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -169,7 +153,6 @@ export function AIModelSettings() {
               <Select
                 value={selected.provider}
                 onValueChange={(value) => {
-                  clearModelOptions(selected.id);
                   updateConfig(selected.id, {
                     provider: value as AIProviderFormat,
                     model: "",
@@ -198,9 +181,9 @@ export function AIModelSettings() {
                   type={showApiKey ? "text" : "password"}
                   value={selected.apiKey}
                   onChange={(event) => {
-                    clearModelOptions(selected.id);
                     updateConfig(selected.id, {
                       apiKey: event.target.value,
+                      model: "",
                       availableModels: [],
                     });
                   }}
@@ -249,9 +232,9 @@ export function AIModelSettings() {
                 id="ai-config-base"
                 value={selected.baseUrl}
                 onChange={(event) => {
-                    clearModelOptions(selected.id);
                     updateConfig(selected.id, {
                       baseUrl: event.target.value,
+                      model: "",
                       availableModels: [],
                     });
                 }}
@@ -259,10 +242,10 @@ export function AIModelSettings() {
               />
             </div>
 
-            <div className="grid gap-2">
+            <div className="grid gap-2 border-t pt-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
-                  <Label htmlFor="ai-config-model">模型 ID</Label>
+                  <Label>可用模型</Label>
                   {models.length > 0 && (
                     <span className="truncate text-xs text-muted-foreground">
                       已获取 {models.length} 个
@@ -285,71 +268,9 @@ export function AIModelSettings() {
                   拉取模型
                 </Button>
               </div>
-              <div className="flex gap-2">
-                <Input
-                  id="ai-config-model"
-                  className="min-w-0 flex-1"
-                  value={selected.model}
-                  onChange={(event) =>
-                    updateConfig(selected.id, { model: event.target.value })
-                  }
-                  placeholder="输入模型 ID"
-                />
-                {models.length > 0 && (
-                  <PopoverPrimitive.Root
-                    open={modelPickerConfigId === selected.id}
-                    onOpenChange={(open) =>
-                      setModelPickerConfigId(open ? selected.id : null)
-                    }
-                  >
-                    <PopoverPrimitive.Trigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="shrink-0 gap-1.5"
-                      >
-                        选择模型
-                        <ChevronsUpDown className="size-3.5 opacity-60" />
-                      </Button>
-                    </PopoverPrimitive.Trigger>
-                    <PopoverPrimitive.Portal>
-                      <PopoverPrimitive.Content
-                        align="end"
-                        sideOffset={4}
-                        className="z-50 flex max-h-[min(24rem,70vh)] w-[min(28rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-md border bg-popover p-0 text-popover-foreground shadow-md outline-none"
-                      >
-                        <Command className="min-h-0 max-h-full">
-                          <CommandInput placeholder="搜索模型 ID" />
-                          <CommandList className="min-h-0 max-h-[min(18rem,50vh)] overflow-y-scroll overscroll-contain [scrollbar-gutter:stable]">
-                            <CommandEmpty>没有匹配的模型</CommandEmpty>
-                            <CommandGroup>
-                              {models.map((model) => (
-                                <CommandItem
-                                  key={model}
-                                  value={model}
-                                  onSelect={() => {
-                                    updateConfig(selected.id, { model });
-                                    setModelPickerConfigId(null);
-                                  }}
-                                >
-                                  <Check
-                                    className={
-                                      selected.model === model
-                                        ? "opacity-100"
-                                        : "opacity-0"
-                                    }
-                                  />
-                                  <span className="truncate">{model}</span>
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </Command>
-                      </PopoverPrimitive.Content>
-                    </PopoverPrimitive.Portal>
-                  </PopoverPrimitive.Root>
-                )}
-              </div>
+              <p className="text-xs leading-5 text-muted-foreground">
+                设置仅同步模型列表；当前使用的模型请直接在首页或对话输入框下方切换。
+              </p>
             </div>
           </div>
         )

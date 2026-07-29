@@ -3,7 +3,7 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import {
-    Users,
+    House,
     FolderOpen,
     Menu,
     ChevronRight,
@@ -59,8 +59,8 @@ function Sidebar({
             </div>
 
             <div className="flex flex-col flex-1 overflow-auto px-2 gap-y-2">
-                <NavItem href="/" icon={FolderOpen} label="项目" compact={collapsed} />
-                <NavItem href="/square" icon={Users} label="广场" compact={collapsed} />
+                <NavItem href="/" icon={House} label="首页" compact={collapsed} />
+                <NavItem href="/projects" icon={FolderOpen} label="项目" compact={collapsed} />
 
                 {!collapsed && recentPresets.length > 0 && (
                     <div className="py-2">
@@ -84,7 +84,7 @@ function Sidebar({
                             ))}
                         </nav>
                         <Link
-                            to="/"
+                            to="/projects"
                             className="block px-2 py-2 text-xs text-muted-foreground hover:text-primary"
                         >
                             查看全部 <ChevronRight className="inline h-3 w-3" />

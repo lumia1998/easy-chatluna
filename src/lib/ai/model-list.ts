@@ -1,4 +1,5 @@
 import type { AIModelConfig } from "@/types/ai";
+import { fetchThroughLocalProxy } from "@/lib/ai/local-proxy";
 
 interface ApiErrorResponse {
   error?: { message?: string };
@@ -19,7 +20,7 @@ async function request<T>(
   headers: HeadersInit,
   fallback?: () => Promise<T>,
 ): Promise<T> {
-  const response = await fetch(url, { headers });
+  const response = await fetchThroughLocalProxy(url, { headers });
   let payload: unknown;
   try {
     payload = await response.json();

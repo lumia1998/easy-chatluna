@@ -1,4 +1,9 @@
-import { useEffect, useRef } from "react";
+import {
+  useEffect,
+  useRef,
+  type ComponentProps,
+  type MouseEvent,
+} from "react";
 import { basicSetup } from "codemirror";
 import {
   autocompletion,
@@ -16,7 +21,21 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from "@codemirror/view";
-import { Braces } from "lucide-react";
+import {
+  Bold,
+  Braces,
+  Code2,
+  Heading1,
+  Heading2,
+  Heading3,
+  Image,
+  Italic,
+  Link,
+  List,
+  Quote,
+  Strikethrough,
+  Underline,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/hooks/use-theme";
 import {
@@ -38,6 +57,8 @@ interface TemplateEditorProps {
   className?: string;
   ariaLabel?: string;
   readOnly?: boolean;
+  fillHeight?: boolean;
+  markdownToolbar?: boolean;
 }
 
 const templateExtension = new Compartment();
@@ -57,6 +78,8 @@ export function TemplateEditor({
   className,
   ariaLabel = "ChatLuna 模板内容",
   readOnly = false,
+  fillHeight = false,
+  markdownToolbar = false,
 }: TemplateEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<EditorView>(null);
@@ -154,20 +177,73 @@ export function TemplateEditor({
     if (!view) return;
     view.dispatch({
       effects: templateTheme.reconfigure(
-        createEditorTheme(theme.resolvedTheme === "dark", minRows, maxRows),
+        createEditorTheme(
+          theme.resolvedTheme === "dark",
+          minRows,
+          maxRows,
+          fillHeight,
+          !readOnly && !markdownToolbar,
+        ),
       ),
     });
-  }, [maxRows, minRows, theme.resolvedTheme]);
+  }, [fillHeight, markdownToolbar, maxRows, minRows, readOnly, theme.resolvedTheme]);
 
   useEffect(() => {
     const view = editorRef.current;
     if (!view || value === valueRef.current) return;
 
+    const selection = view.state.selection.main;
     valueRef.current = value;
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: value },
+      selection: {
+        anchor: Math.min(selection.anchor, value.length),
+        head: Math.min(selection.head, value.length),
+      },
     });
   }, [value]);
+
+  const applyInline = (before: string, after: string, placeholderText: string) => {
+    const view = editorRef.current;
+    if (!view) return;
+
+    const selection = view.state.selection.main;
+    const selectedText = view.state.sliceDoc(selection.from, selection.to);
+    const content = selectedText || placeholderText;
+    const insert = `${before}${content}${after}`;
+    const contentFrom = selection.from + before.length;
+    view.dispatch({
+      changes: { from: selection.from, to: selection.to, insert },
+      selection: {
+        anchor: contentFrom,
+        head: contentFrom + content.length,
+      },
+    });
+    view.focus();
+  };
+
+  const applyLinePrefix = (prefix: string, stripHeadings = false) => {
+    const view = editorRef.current;
+    if (!view) return;
+
+    const selection = view.state.selection.main;
+    const firstLine = view.state.doc.lineAt(selection.from);
+    const lastPosition = selection.to > selection.from ? selection.to - 1 : selection.to;
+    const lastLine = view.state.doc.lineAt(lastPosition);
+    const block = view.state.sliceDoc(firstLine.from, lastLine.to);
+    const insert = block
+      .split("\n")
+      .map((line) => `${prefix}${stripHeadings ? line.replace(/^#{1,6}\s+/, "") : line}`)
+      .join("\n");
+    view.dispatch({
+      changes: { from: firstLine.from, to: lastLine.to, insert },
+      selection: {
+        anchor: firstLine.from,
+        head: firstLine.from + insert.length,
+      },
+    });
+    view.focus();
+  };
 
   const escapeSelection = () => {
     const view = editorRef.current;
@@ -191,10 +267,23 @@ export function TemplateEditor({
   };
 
   return (
-    <div className={cn(className)}>
-      <div className="relative">
-        <div ref={containerRef} />
-        {!readOnly && (
+    <div
+      className={cn(
+        "flex flex-col",
+        fillHeight && "h-full min-h-0",
+        className,
+      )}
+    >
+      {markdownToolbar && !readOnly && (
+        <MarkdownToolbar
+          onInline={applyInline}
+          onLinePrefix={applyLinePrefix}
+          onEscape={escapeSelection}
+        />
+      )}
+      <div className={cn("relative min-h-0", fillHeight && "flex-1")}>
+        <div ref={containerRef} className={cn(fillHeight && "h-full min-h-0")} />
+        {!readOnly && !markdownToolbar && (
           <Button
             type="button"
             variant="ghost"
@@ -210,6 +299,96 @@ export function TemplateEditor({
       </div>
     </div>
   );
+}
+
+function MarkdownToolbar({
+  onInline,
+  onLinePrefix,
+  onEscape,
+}: {
+  onInline: (before: string, after: string, placeholderText: string) => void;
+  onLinePrefix: (prefix: string, stripHeadings?: boolean) => void;
+  onEscape: () => void;
+}) {
+  const keepSelection = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+  };
+  const toolClass = "size-7 rounded-sm text-muted-foreground hover:text-foreground";
+
+  return (
+    <div
+      className="flex h-9 shrink-0 items-center gap-0.5 overflow-x-auto border-b px-1.5"
+      role="toolbar"
+      aria-label="Markdown 格式工具栏"
+    >
+      <ToolbarButton label="一级标题" onMouseDown={keepSelection} onClick={() => onLinePrefix("# ", true)}>
+        <Heading1 />
+      </ToolbarButton>
+      <ToolbarButton label="二级标题" onMouseDown={keepSelection} onClick={() => onLinePrefix("## ", true)}>
+        <Heading2 />
+      </ToolbarButton>
+      <ToolbarButton label="三级标题" onMouseDown={keepSelection} onClick={() => onLinePrefix("### ", true)}>
+        <Heading3 />
+      </ToolbarButton>
+      <ToolbarDivider />
+      <ToolbarButton label="加粗" onMouseDown={keepSelection} onClick={() => onInline("**", "**", "加粗文本")}>
+        <Bold />
+      </ToolbarButton>
+      <ToolbarButton label="斜体" onMouseDown={keepSelection} onClick={() => onInline("*", "*", "斜体文本")}>
+        <Italic />
+      </ToolbarButton>
+      <ToolbarButton label="删除线" onMouseDown={keepSelection} onClick={() => onInline("~~", "~~", "删除文本")}>
+        <Strikethrough />
+      </ToolbarButton>
+      <ToolbarButton label="下划线" onMouseDown={keepSelection} onClick={() => onInline("<u>", "</u>", "下划线文本")}>
+        <Underline />
+      </ToolbarButton>
+      <ToolbarDivider />
+      <ToolbarButton label="链接" onMouseDown={keepSelection} onClick={() => onInline("[", "](https://)", "链接文字")}>
+        <Link />
+      </ToolbarButton>
+      <ToolbarButton label="图片" onMouseDown={keepSelection} onClick={() => onInline("![", "](https://)", "图片描述")}>
+        <Image />
+      </ToolbarButton>
+      <ToolbarButton label="行内代码" onMouseDown={keepSelection} onClick={() => onInline("`", "`", "代码")}>
+        <Code2 />
+      </ToolbarButton>
+      <ToolbarButton label="引用" onMouseDown={keepSelection} onClick={() => onLinePrefix("> ")}>
+        <Quote />
+      </ToolbarButton>
+      <ToolbarButton label="无序列表" onMouseDown={keepSelection} onClick={() => onLinePrefix("- ")}>
+        <List />
+      </ToolbarButton>
+      <ToolbarDivider />
+      <ToolbarButton label="转义花括号" onMouseDown={keepSelection} onClick={onEscape}>
+        <Braces />
+      </ToolbarButton>
+    </div>
+  );
+
+  function ToolbarButton({
+    label,
+    children,
+    ...props
+  }: ComponentProps<typeof Button> & { label: string }) {
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        className={toolClass}
+        title={label}
+        aria-label={label}
+        {...props}
+      >
+        {children}
+      </Button>
+    );
+  }
+}
+
+function ToolbarDivider() {
+  return <span className="mx-1 h-4 w-px shrink-0 bg-border" aria-hidden="true" />;
 }
 
 function createTemplateExtensions(
@@ -368,33 +547,47 @@ function consumeClosingBrace(view: EditorView, position: number) {
     : position;
 }
 
-function createEditorTheme(dark: boolean, minRows: number, maxRows?: number) {
+function createEditorTheme(
+  dark: boolean,
+  minRows: number,
+  maxRows?: number,
+  fillHeight = false,
+  overlayAction = false,
+) {
   return EditorView.theme(
     {
       "&": {
-        border: "1px solid var(--input)",
-        borderRadius: "var(--radius)",
+        border: fillHeight ? "0" : "1px solid var(--input)",
+        borderRadius: fillHeight ? "0" : "var(--radius)",
         backgroundColor: dark
           ? "color-mix(in oklch, var(--input) 30%, transparent)"
           : "transparent",
         fontSize: "0.875rem",
         overflow: "hidden",
+        height: fillHeight ? "100%" : undefined,
       },
       "&.cm-focused": {
         outline: "none",
         borderColor: "var(--ring)",
       },
       ".cm-scroller": {
-        minHeight: `${Math.max(minRows, 3) * 1.5}rem`,
-        maxHeight: maxRows
-          ? `${Math.max(maxRows, minRows, 3) * 1.5}rem`
-          : "32rem",
+        minHeight: fillHeight
+          ? "100%"
+          : `${Math.max(minRows, 3) * 1.5}rem`,
+        height: fillHeight ? "100%" : undefined,
+        maxHeight: fillHeight
+          ? "none"
+          : maxRows
+            ? `${Math.max(maxRows, minRows, 3) * 1.5}rem`
+            : "32rem",
         fontFamily:
           "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
         lineHeight: "1.5rem",
       },
       ".cm-content": {
-        padding: "0.65rem 2.75rem 0.65rem 0.75rem",
+        padding: overlayAction
+          ? "0.65rem 2.75rem 0.65rem 0.75rem"
+          : "0.65rem 0.75rem",
         caretColor: "var(--foreground)",
       },
       ".cm-line": { padding: "0" },

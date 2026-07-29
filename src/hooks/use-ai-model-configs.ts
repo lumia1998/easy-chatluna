@@ -56,7 +56,7 @@ export function useAIModelConfigs() {
     setStore((prev) => {
       const next: AIModelConfigStore = {
         configs: [...prev.configs, config],
-        activeConfigId: config.id,
+        activeConfigId: prev.activeConfigId ?? config.id,
       };
       return persist(next);
     });

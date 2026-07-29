@@ -3,6 +3,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { LanguageModel, ToolSet } from "ai";
 import type { AIModelConfig } from "@/types/ai";
+import { fetchThroughLocalProxy } from "@/lib/ai/local-proxy";
 
 function normalizeBaseUrl(baseUrl: string): string {
   let url = baseUrl.trim();
@@ -48,6 +49,7 @@ export function createLanguageModelFromConfig(
       const openai = createOpenAI({
         apiKey,
         baseURL,
+        fetch: fetchThroughLocalProxy,
       });
       // web_search is a Responses-only provider-executed tool.
       return options.preferResponsesApi
@@ -58,6 +60,7 @@ export function createLanguageModelFromConfig(
       const anthropic = createAnthropic({
         apiKey,
         baseURL,
+        fetch: fetchThroughLocalProxy,
       });
       return anthropic(modelId);
     }
@@ -65,6 +68,7 @@ export function createLanguageModelFromConfig(
       const google = createGoogleGenerativeAI({
         apiKey,
         baseURL,
+        fetch: fetchThroughLocalProxy,
       });
       return google(modelId);
     }
@@ -94,13 +98,21 @@ export function createProviderWebSearchTools(
 
   switch (config.provider) {
     case "openai": {
-      const openai = createOpenAI({ apiKey, baseURL });
+      const openai = createOpenAI({
+        apiKey,
+        baseURL,
+        fetch: fetchThroughLocalProxy,
+      });
       return {
         web_search: openai.tools.webSearch({}),
       };
     }
     case "anthropic": {
-      const anthropic = createAnthropic({ apiKey, baseURL });
+      const anthropic = createAnthropic({
+        apiKey,
+        baseURL,
+        fetch: fetchThroughLocalProxy,
+      });
       return {
         web_search: anthropic.tools.webSearch_20250305({}),
       };
@@ -109,6 +121,7 @@ export function createProviderWebSearchTools(
       const google = createGoogleGenerativeAI({
         apiKey,
         baseURL,
+        fetch: fetchThroughLocalProxy,
       });
       return {
         google_search: google.tools.googleSearch({}),
