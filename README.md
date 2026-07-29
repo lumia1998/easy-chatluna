@@ -1,6 +1,9 @@
-# ChatLuna 预设站
+# Easy ChatLuna
 
-用于创建、编辑、浏览和分享 ChatLuna 预设的在线站点。
+用于创建、编辑、浏览和分享 ChatLuna 预设的在线工具。
+
+本项目基于 [ChatLunaLab/preset-editor](https://github.com/ChatLunaLab/preset-editor)
+开发，并保持对 ChatLuna 预设格式的兼容。
 
 ## Roadmap
 
@@ -9,12 +12,15 @@
 - [x] 伪装预设编辑器
 - [x] 预设广场
 
-## Usage
+## 本地开发
 
-前往 [https://preset.chatluna.chat](https://preset.chatluna.chat) 体验。
+```bash
+corepack enable
+yarn install
+yarn dev
+```
 
-
-## LICENSE
+## License
 
 ```text
 MIT License

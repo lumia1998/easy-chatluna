@@ -37,7 +37,7 @@ function Sidebar({
                 )}
             >
                 <span className={cn("truncate font-medium", collapsed && "sr-only")}>
-                    ChatLuna 预设站
+                    Easy ChatLuna
                 </span>
                 {onToggle && (
                     <Button
