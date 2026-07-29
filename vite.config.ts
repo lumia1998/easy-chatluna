@@ -6,6 +6,9 @@ import autoprefixer from "autoprefixer";
 
 // https://vite.dev/config/
 export default defineConfig({
+    // Keep production assets relative so the app works from a GitHub Pages
+    // project path (for example /easy-chatluna/) as well as a custom domain.
+    base: "./",
     css: {
         postcss: {
             plugins: [autoprefixer()],
