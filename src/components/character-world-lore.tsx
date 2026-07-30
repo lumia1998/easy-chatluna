@@ -36,10 +36,22 @@ export function CharacterWorldLore({
 }: CharacterWorldLoreProps) {
     const [isRegexMap, setIsRegexMap] = useState<Record<string, boolean>>({});
 
+    // 为每条 lore 生成稳定的内容标识（用于 key 和 isRegexMap）
+    const getLoreStableId = (lore: RawWorldLore, index: number): string => {
+        const firstKeyword = normalizeKeywords(lore.keywords)[0];
+        const keywordStr = firstKeyword instanceof RegExp
+            ? firstKeyword.source
+            : (firstKeyword ?? "");
+        // 用内容片段 + fallback index 作为稳定标识
+        return `${keywordStr.slice(0, 30)}-${lore.content.slice(0, 20)}-${index}`;
+    };
+
     const WorldLoresItem = (
         lore: RawWorldLore,
         index: number
     ) => {
+        const loreId = getLoreStableId(lore, index);
+
         const handleKeywordDelete = (kidx: number) => {
             if (!isWorldLore(lore)) return;
             const currentKeywords = normalizeKeywords(lore.keywords);
@@ -56,13 +68,13 @@ export function CharacterWorldLore({
         const handleKeywordChange = (value: string, kidx: number) => {
             if (!isWorldLore(lore)) return;
             const currentKeywords = normalizeKeywords(lore.keywords);
-            const key = `${index}-${kidx}`;
+            const key = `${loreId}-${kidx}`;
             currentKeywords[kidx] = isRegexMap[key] ? new RegExp(value) : value;
             updatePreset?.(`world_lores.${index}.keywords`, currentKeywords);
         };
 
         const toggleRegex = (kidx: number) => {
-            const key = `${index}-${kidx}`;
+            const key = `${loreId}-${kidx}`;
             setIsRegexMap((prev) => ({
                 ...prev,
                 [key]: !prev[key],
@@ -76,7 +88,7 @@ export function CharacterWorldLore({
             firstKeyword instanceof RegExp ? firstKeyword.source : firstKeyword;
 
         return (
-            <Card key={index} className="mx-4 mb-4 gap-4 py-4">
+            <Card key={loreId} className="mx-4 mb-4 gap-4 py-4">
                 <CardHeader className="flex flex-row items-center justify-between px-4">
                     <CardTitle className="text-lg">
                         {title || "未命名条目"}
@@ -97,7 +109,7 @@ export function CharacterWorldLore({
                             {normalizeKeywords(lore.keywords).map(
                                 (keyword, kidx) => (
                                     <div
-                                        key={kidx}
+                                        key={`${loreId}-kw-${kidx}`}
                                         className="flex gap-2 items-center"
                                     >
                                         <div className="relative flex-1 flex items-center">
@@ -124,7 +136,7 @@ export function CharacterWorldLore({
                                                             className={cn(
                                                                 "absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 p-0",
                                                                 isRegexMap[
-                                                                    `${index}-${kidx}`
+                                                                    `${loreId}-${kidx}`
                                                                 ] &&
                                                                     "bg-primary/20"
                                                             )}
@@ -144,7 +156,8 @@ export function CharacterWorldLore({
                                             </TooltipProvider>
                                         </div>
                                         <Button
-                                            aria-label="Delete keyword"
+                                            aria-label="删除关键词"
+                                            title="删除关键词"
                                             variant="ghost"
                                             size="icon"
                                             className="size-8"

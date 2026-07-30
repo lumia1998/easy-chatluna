@@ -1,15 +1,23 @@
 "use client";
 
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   FileCode2,
-  FileText,
   Menu,
   MessageSquare,
   PanelLeftClose,
+  Pencil,
   Plus,
   Settings2,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -24,34 +32,31 @@ import {
   getOrCreateWorkspaceChat,
 } from "@/lib/workspace-chat-store";
 import { cn } from "@/lib/utils";
+import {
+  createWorkspacePreset,
+  deletePreset,
+  renamePresetData,
+} from "@/lib/preset-store";
+import { renamePresetSource } from "@/lib/workspace-preset-import";
+import { mutatePreset } from "@/lib/preset-mutation-queue";
+import { toast } from "sonner";
 import type { PresetModel } from "@/lib/database";
 
-const PresetWorkspace = lazy(() =>
+const StoredPresetWorkspace = lazy(() =>
   import("@/components/preset-workspace").then((module) => ({
-    default: module.PresetWorkspace,
-  })),
-);
-const CharacterEditor = lazy(() =>
-  import("@/components/character-editor").then((module) => ({
-    default: module.CharacterEditor,
+    default: module.StoredPresetWorkspace,
   })),
 );
 
-type WorkbenchTab =
-  | {
-      id: `draft:${"main" | "character"}`;
-      kind: "draft";
-      presetType: "main" | "character";
-      label: string;
-    }
-  | {
-      id: `preset:${string}`;
-      kind: "preset";
-      presetId: string;
-      label: string;
-    };
+interface WorkbenchTab {
+  id: `preset:${string}`;
+  kind: "preset";
+  presetId: string;
+  label: string;
+}
 
 const ACTIVE_CONVERSATION_STORAGE_KEY = "easy-chatluna:active-workspace-chat";
+const WORKBENCH_TABS_STORAGE_KEY = "easy-chatluna:workbench-tabs";
 
 function readActiveConversationId(): string | null {
   try {
@@ -61,17 +66,86 @@ function readActiveConversationId(): string | null {
   }
 }
 
+function isWorkbenchTab(value: unknown): value is WorkbenchTab {
+  if (!value || typeof value !== "object") return false;
+  const tab = value as Partial<WorkbenchTab>;
+  if (typeof tab.id !== "string" || typeof tab.label !== "string") return false;
+  return tab.kind === "preset" && typeof tab.presetId === "string";
+}
+
+/** Restores the tab strip so a refresh keeps the open editors in place. */
+function readStoredTabs(): { tabs: WorkbenchTab[]; activeTabId: string } {
+  try {
+    const raw = localStorage.getItem(WORKBENCH_TABS_STORAGE_KEY);
+    if (!raw) return { tabs: [], activeTabId: "chat" };
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return { tabs: [], activeTabId: "chat" };
+    }
+    const store = parsed as {
+      tabs?: unknown;
+      activeTabId?: unknown;
+    };
+    const tabs = Array.isArray(store.tabs)
+      ? store.tabs.filter(isWorkbenchTab)
+      : [];
+    const activeTabId =
+      typeof store.activeTabId === "string" &&
+      (store.activeTabId === "chat" ||
+        tabs.some((tab) => tab.id === store.activeTabId))
+        ? store.activeTabId
+        : "chat";
+    return { tabs, activeTabId };
+  } catch {
+    return { tabs: [], activeTabId: "chat" };
+  }
+}
+
 export default function HomePage() {
   const presets = usePresets();
   const conversations = useWorkspaceChats();
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const [sidebarOpen, setSidebarOpen] = useState(() =>
-    window.matchMedia("(min-width: 768px)").matches,
-  );
+  const [sidebarOverride, setSidebarOverride] = useState<{
+    desktop: boolean;
+    open: boolean;
+  } | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
-  const [tabs, setTabs] = useState<WorkbenchTab[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string>("chat");
+  const [tabs, setTabs] = useState<WorkbenchTab[]>(() => readStoredTabs().tabs);
+  const [activeTabId, setActiveTabId] = useState<string>(
+    () => readStoredTabs().activeTabId,
+  );
   const initializedRef = useRef(false);
+
+  // Default to the breakpoint, and drop any manual toggle once it changes so a
+  // mobile-collapsed sidebar reopens on desktop.
+  const sidebarOpen =
+    sidebarOverride && sidebarOverride.desktop === isDesktop
+      ? sidebarOverride.open
+      : isDesktop;
+  const setSidebarOpen = useCallback(
+    (next: boolean | ((open: boolean) => boolean)) => {
+      setSidebarOverride((current) => {
+        const open =
+          current && current.desktop === isDesktop ? current.open : isDesktop;
+        return {
+          desktop: isDesktop,
+          open: typeof next === "function" ? next(open) : next,
+        };
+      });
+    },
+    [isDesktop],
+  );
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        WORKBENCH_TABS_STORAGE_KEY,
+        JSON.stringify({ tabs, activeTabId }),
+      );
+    } catch {
+      // Tabs stay usable for the current page lifetime without persistence.
+    }
+  }, [tabs, activeTabId]);
 
   useEffect(() => {
     if (initializedRef.current) return;
@@ -88,23 +162,26 @@ export default function HomePage() {
     }
   }, [conversationId]);
 
-  const openDraft = (presetType: "main" | "character") => {
-    const id = `draft:${presetType}` as const;
+
+  const openPresetById = (presetId: string, label: string) => {
+    const id = `preset:${presetId}` as const;
     setTabs((current) =>
       current.some((tab) => tab.id === id)
         ? current
-        : [
-            ...current,
-            {
-              id,
-              kind: "draft",
-              presetType,
-              label: presetType === "main" ? "主插件预设" : "伪装预设",
-            },
-          ],
+        : [...current, { id, kind: "preset", presetId, label }],
     );
     setActiveTabId(id);
     if (!isDesktop) setSidebarOpen(false);
+  };
+
+  const createPreset = async (type: "main" | "character") => {
+    try {
+      const { id, name } = await createWorkspacePreset(type);
+      openPresetById(id, name);
+      toast.success(`已创建 ${name}`);
+    } catch {
+      toast.error("创建预设失败");
+    }
   };
 
   const openPreset = (preset: PresetModel) => {
@@ -121,6 +198,28 @@ export default function HomePage() {
   const closeTab = (id: string) => {
     setTabs((current) => current.filter((tab) => tab.id !== id));
     if (activeTabId === id) setActiveTabId("chat");
+  };
+
+  const renamePreset = async (preset: PresetModel, name: string) => {
+    try {
+      await mutatePreset(preset.id, (latest) => ({
+        preset: renamePresetSource(latest, name) ?? renamePresetData(latest, name),
+        changedFields: ["name"],
+        message: `已重命名为 ${name}`,
+      }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "重命名失败");
+    }
+  };
+
+  const removePreset = async (preset: PresetModel) => {
+    try {
+      await deletePreset(preset.id);
+      closeTab(`preset:${preset.id}`);
+      toast.success(`已删除 ${preset.name}`);
+    } catch {
+      toast.error("删除预设失败");
+    }
   };
 
   const selectConversation = (id: string) => {
@@ -197,7 +296,13 @@ export default function HomePage() {
             sidebarOpen ? "w-64 translate-x-0" : isDesktop ? "w-0 overflow-hidden border-r-0" : "w-64 -translate-x-full",
           )}
         >
-          <SidebarFiles presets={presets} onOpenDraft={openDraft} onOpenPreset={openPreset} />
+          <SidebarFiles
+            presets={presets}
+            onCreatePreset={createPreset}
+            onOpenPreset={openPreset}
+            onRenamePreset={renamePreset}
+            onDeletePreset={removePreset}
+          />
           <SidebarConversations
             conversations={conversations}
             activeId={conversationId}
@@ -220,12 +325,10 @@ export default function HomePage() {
                 key={tab.id}
                 active={activeTabId === tab.id}
                 label={
-                  tab.kind === "preset"
-                    ? presets.find((preset) => preset.id === tab.presetId)?.name ??
-                      tab.label
-                    : tab.label
+                  presets.find((preset) => preset.id === tab.presetId)?.name ??
+                  tab.label
                 }
-                icon={tab.kind === "draft" ? <FileText /> : <FileCode2 />}
+                icon={<FileCode2 />}
                 onClick={() => setActiveTabId(tab.id)}
                 onClose={() => closeTab(tab.id)}
               />
@@ -235,17 +338,16 @@ export default function HomePage() {
           <div className="relative min-h-0 flex-1 overflow-hidden">
             {conversationId && (
               <div className={cn("absolute inset-0", activeTabId !== "chat" && "hidden")}>
-                <WorkspaceChat conversationId={conversationId} onOpenDraft={openDraft} />
+                <WorkspaceChat
+                  conversationId={conversationId}
+                  onCreatePreset={createPreset}
+                />
               </div>
             )}
             {tabs.map((tab) => (
               <div key={tab.id} className={cn("absolute inset-0", activeTabId !== tab.id && "hidden")}>
                 <Suspense fallback={<WorkspaceLoading />}>
-                  {tab.kind === "draft" ? (
-                    <PresetWorkspace type={tab.presetType} embedded />
-                  ) : (
-                    <CharacterEditor presetId={tab.presetId} embedded />
-                  )}
+                  <StoredPresetWorkspace presetId={tab.presetId} embedded />
                 </Suspense>
               </div>
             ))}
@@ -267,27 +369,40 @@ function WorkspaceLoading() {
 
 function SidebarFiles({
   presets,
-  onOpenDraft,
+  onCreatePreset,
   onOpenPreset,
+  onRenamePreset,
+  onDeletePreset,
 }: {
   presets: PresetModel[];
-  onOpenDraft: (type: "main" | "character") => void;
+  onCreatePreset: (type: "main" | "character") => void;
   onOpenPreset: (preset: PresetModel) => void;
+  onRenamePreset: (preset: PresetModel, name: string) => Promise<void>;
+  onDeletePreset: (preset: PresetModel) => void;
 }) {
   return (
     <section className="flex min-h-0 flex-col border-b">
       <div className="flex h-9 shrink-0 items-center justify-between px-3 text-xs font-medium text-muted-foreground">
-        <span>文件</span>
+        <span>项目</span>
         <div className="flex gap-0.5">
-          <Button variant="ghost" size="icon-xs" onClick={() => onOpenDraft("main")} aria-label="新建主插件预设" title="新建主插件预设"><Plus /></Button>
-          <Button variant="ghost" size="icon-xs" onClick={() => onOpenDraft("character")} aria-label="新建伪装预设" title="新建伪装预设"><Sparkles /></Button>
+          <Button variant="ghost" size="icon-xs" onClick={() => onCreatePreset("main")} aria-label="新建主插件预设" title="新建主插件预设"><Plus /></Button>
+          <Button variant="ghost" size="icon-xs" onClick={() => onCreatePreset("character")} aria-label="新建伪装预设" title="新建伪装预设"><Sparkles /></Button>
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
-        <SidebarItem icon={<FileText />} label="主插件草稿" onClick={() => onOpenDraft("main")} />
-        <SidebarItem icon={<FileText />} label="伪装预设草稿" onClick={() => onOpenDraft("character")} />
+        {presets.length === 0 && (
+          <p className="px-2 py-3 text-xs leading-5 text-muted-foreground">
+            还没有项目。点右上角 + 新建主插件预设，或用星标新建伪装预设。
+          </p>
+        )}
         {presets.map((preset) => (
-          <SidebarItem key={preset.id} icon={<FileCode2 />} label={preset.name} meta={preset.type === "main" ? "主插件" : "伪装"} onClick={() => onOpenPreset(preset)} />
+          <SidebarPresetItem
+            key={preset.id}
+            preset={preset}
+            onOpen={() => onOpenPreset(preset)}
+            onRename={(name) => onRenamePreset(preset, name)}
+            onDelete={() => onDeletePreset(preset)}
+          />
         ))}
       </div>
     </section>
@@ -328,25 +443,91 @@ function SidebarConversations({
   );
 }
 
-function SidebarItem({
-  icon,
-  label,
-  meta,
-  active,
-  onClick,
+function SidebarPresetItem({
+  preset,
+  onOpen,
+  onRename,
+  onDelete,
 }: {
-  icon: React.ReactNode;
-  label: string;
-  meta?: string;
-  active?: boolean;
-  onClick: () => void;
+  preset: PresetModel;
+  onOpen: () => void;
+  onRename: (name: string) => Promise<void>;
+  onDelete: () => void;
 }) {
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(preset.name);
+
+  const commit = async () => {
+    const next = draft.trim();
+    setRenaming(false);
+    if (!next || next === preset.name) {
+      setDraft(preset.name);
+      return;
+    }
+    await onRename(next);
+  };
+
+  if (renaming) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") void commit();
+          if (event.key === "Escape") {
+            setDraft(preset.name);
+            setRenaming(false);
+          }
+        }}
+        aria-label={`重命名 ${preset.name}`}
+        className="h-8 w-full rounded-sm border bg-background px-2 text-sm outline-none"
+      />
+    );
+  }
+
   return (
-    <button type="button" onClick={onClick} className={cn("flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-sm transition-colors hover:bg-muted", active && "bg-muted font-medium")}>
-      <span className="[&_svg]:size-3.5 text-muted-foreground">{icon}</span>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {meta && <span className="shrink-0 text-[10px] text-muted-foreground">{meta}</span>}
-    </button>
+    <div className="group flex items-center rounded-sm transition-colors hover:bg-muted">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left text-sm"
+      >
+        <span className="[&_svg]:size-3.5 text-muted-foreground">
+          <FileCode2 />
+        </span>
+        <span className="min-w-0 flex-1 truncate">{preset.name}</span>
+        <span className="shrink-0 text-[10px] text-muted-foreground group-hover:hidden">
+          {preset.type === "main" ? "主插件" : "伪装"}
+        </span>
+      </button>
+      <div className="mr-1 flex shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          onClick={() => {
+            setDraft(preset.name);
+            setRenaming(true);
+          }}
+          aria-label={`重命名 ${preset.name}`}
+          title="重命名"
+        >
+          <Pencil />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          onClick={onDelete}
+          aria-label={`删除 ${preset.name}`}
+          title="删除"
+        >
+          <Trash2 />
+        </Button>
+      </div>
+    </div>
   );
 }
 

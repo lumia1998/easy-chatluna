@@ -3,7 +3,7 @@ import { Label } from "@/components/ui/label";
 import { CharacterPresetTemplate } from "@/types/preset";
 import { GetNestedType, NestedKeyOf } from "@/types/util";
 import { Button } from "./ui/button";
-import { ChevronDown, Plus } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { TemplateEditor } from "./template-editor";
@@ -44,17 +44,12 @@ export function CharacterInput({
                         <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => toggleSection("basic")}
-                            className="h-8 w-8 p-0"
-                        >
-                            <Plus
-                                className=
-                                "h-4 w-4 transition-transform duration-200"
-                            />
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="icon"
+                            aria-label={
+                                openSections.basic ? "收起输入提示词" : "展开输入提示词"
+                            }
+                            title={
+                                openSections.basic ? "收起输入提示词" : "展开输入提示词"
+                            }
                             onClick={() => toggleSection("basic")}
                             className="h-8 w-8 p-0"
                         >

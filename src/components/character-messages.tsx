@@ -113,7 +113,7 @@ export function CharacterMessagesForm({
                         <CardContent className="space-y-4 pt-6">
                             {preset.prompts.map((message, index) => (
                                 <div
-                                    key={index}
+                                    key={`prompt-${index}-${message.role}-${message.content.slice(0, 30)}`}
                                     className={cn(
                                         "flex gap-4 items-start w-full",
                                         isMobile ? "flex-col" : ""
@@ -169,6 +169,8 @@ export function CharacterMessagesForm({
                                     <Button
                                         variant="ghost"
                                         size="icon"
+                                         aria-label="删除该提示词"
+                                         title="删除该提示词"
                                          className="size-10 p-0 h-8"
                                          onClick={() => {
                                              const prompts = [...preset.prompts];

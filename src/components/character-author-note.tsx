@@ -128,6 +128,10 @@ export function CharacterAuthorNote({
                                 <div className="space-y-2">
                                     <Label>插入位置</Label>
                                     <Select
+                                        value={
+                                            preset.authors_note
+                                                ?.insertPosition ?? ""
+                                        }
                                         onValueChange={(value) => {
                                             updatePreset?.(
                                                 "authors_note.insertPosition",

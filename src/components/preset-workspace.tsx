@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import TextareaAutosize from "react-textarea-autosize";
 import { generateText } from "ai";
 import { useNavigate } from "react-router";
 import {
@@ -42,7 +43,6 @@ import { isAIModelConfigReady } from "@/lib/ai/model-config";
 import { sanitizeAIErrorMessage } from "@/lib/ai/error-sanitize";
 import {
   WORKSPACE_FORMATS,
-  WORKSPACE_STARTERS,
   XIAOKUI_REFERENCES,
   getDefaultFormat,
   type WorkspacePresetType,
@@ -51,6 +51,14 @@ import {
   serializeWorkspacePreset,
   workspaceExportFileName,
 } from "@/lib/workspace-preset-export";
+import {
+  applyWorkspaceSource,
+  presetToWorkspaceSource,
+  workspaceTypeOfPreset,
+} from "@/lib/workspace-preset-import";
+import { mutatePreset } from "@/lib/preset-mutation-queue";
+import { usePreset } from "@/hooks/use-preset";
+import { MessageResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 import {
   AI_PROVIDER_LABELS,
@@ -60,11 +68,11 @@ import {
 import { toast } from "sonner";
 
 type WorkspacePane = "outline" | "editor" | "reference" | "assistant";
-interface StoredWorkspaceDraft {
-  source: string;
-  fileName: string;
-}
 
+interface AssistantMessage {
+  role: "user" | "assistant";
+  content: string;
+}
 interface OutlineEntry {
   level: number;
   label: string;
@@ -95,64 +103,61 @@ function downloadPreset(fileName: string, source: string) {
   URL.revokeObjectURL(url);
 }
 
-function defaultWorkspaceFileName(type: WorkspacePresetType): string {
-  return type === "main" ? "我的主预设.md" : "我的伪装预设.md";
-}
 
-function loadWorkspaceDraft(
-  key: string,
-  type: WorkspacePresetType,
-  legacyKey?: string,
-): { draft: StoredWorkspaceDraft; failed: boolean } {
-  const fallback = {
-    source: WORKSPACE_STARTERS[type],
-    fileName: defaultWorkspaceFileName(type),
-  };
-  try {
-    for (const candidate of [key, legacyKey].filter(
-      (value): value is string => Boolean(value),
-    )) {
-      const raw = localStorage.getItem(candidate);
-      if (raw === null) continue;
-      try {
-        const parsed = JSON.parse(raw) as Partial<StoredWorkspaceDraft>;
-        if (parsed && typeof parsed.source === "string") {
-          return {
-            draft: {
-              source: parsed.source,
-              fileName:
-                typeof parsed.fileName === "string" && parsed.fileName
-                  ? parsed.fileName
-                  : fallback.fileName,
-            },
-            failed: false,
-          };
-        }
-      } catch {
-        return { draft: { ...fallback, source: raw }, failed: false };
-      }
-    }
-    return { draft: fallback, failed: false };
-  } catch {
-    return { draft: fallback, failed: true };
+/**
+ * Opens a stored preset in the Markdown workspace. Edits are written back to the
+ * preset record instead of the local draft slot.
+ */
+export function StoredPresetWorkspace({
+  presetId,
+  embedded = false,
+}: {
+  presetId: string;
+  embedded?: boolean;
+}) {
+  const preset = usePreset(presetId);
+
+  if (preset === undefined) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        正在载入预设
+      </div>
+    );
   }
-}
-
-function saveWorkspaceDraft(key: string, draft: StoredWorkspaceDraft): boolean {
-  try {
-    localStorage.setItem(key, JSON.stringify(draft));
-    return true;
-  } catch {
-    return false;
+  if (preset === null) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        预设不存在或已被删除
+      </div>
+    );
   }
+
+  // `key` pins the mount to this preset, so the child reads these props only in its
+  // state initializer — later live-query updates cannot clobber in-flight edits.
+  return (
+    <PresetWorkspace
+      key={presetId}
+      type={workspaceTypeOfPreset(preset)}
+      embedded={embedded}
+      presetId={presetId}
+      initialSource={presetToWorkspaceSource(preset)}
+      initialFileName={`${preset.name}.md`}
+    />
+  );
 }
 
-export function PresetWorkspace({
+function PresetWorkspace({
   type,
   embedded = false,
+  presetId,
+  initialSource,
+  initialFileName,
 }: {
   type: WorkspacePresetType;
   embedded?: boolean;
+  presetId: string;
+  initialSource: string;
+  initialFileName: string;
 }) {
   const navigate = useNavigate();
   const {
@@ -161,7 +166,7 @@ export function PresetWorkspace({
     options: assistantModelOptions,
     setSelectionValue: setAssistantModelValue,
     setReasoning: setAssistantReasoning,
-  } = useScopedAIModel(`preset-workspace:${type}`);
+  } = useScopedAIModel(`preset-workspace:${presetId}`);
   const reasoningLevels = useModelReasoningLevels(assistantConfig);
   const assistantReasoning = assistantConfig
     ? reasoningLevels.includes(assistantConfig.reasoning)
@@ -170,22 +175,14 @@ export function PresetWorkspace({
         ? "medium"
         : reasoningLevels[0]
     : undefined;
-  const storageKey = `easy-chatluna:workspace:${type}`;
-  const [initialDraft] = useState(() =>
-    loadWorkspaceDraft(
-      storageKey,
-      type,
-      `easy-chatluna:workspace:${type}:${getDefaultFormat(type)}`,
-    ),
-  );
-  const [source, setSource] = useState(initialDraft.draft.source);
-  const [fileName, setFileName] = useState(initialDraft.draft.fileName);
-  const latestDraftRef = useRef({ storageKey, source, fileName });
-  const saveErrorShownRef = useRef(initialDraft.failed);
+  const [initialSourceValue] = useState(initialSource);
+  const [source, setSource] = useState(initialSource);
+  const [fileName, setFileName] = useState(initialFileName);
+  const saveErrorShownRef = useRef(false);
   const [mobilePane, setMobilePane] = useState<WorkspacePane>("editor");
   const [assistantInput, setAssistantInput] = useState("");
-  const [assistantMessages, setAssistantMessages] = useState<string[]>([
-    "我会保留你的原始设定，只以补丁形式提供建议。",
+  const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([
+    { role: "assistant", content: "我会保留你的原始设定，只以补丁形式提供建议。" },
   ]);
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [analysisResult, setAnalysisResult] = useState("");
@@ -202,34 +199,22 @@ export function PresetWorkspace({
     [outline, type],
   );
 
+  // Debounced write-back to the preset record; skipped until the document changes.
   useEffect(() => {
-    latestDraftRef.current = { storageKey, source, fileName };
+    if (source === initialSourceValue) return;
     const timeout = window.setTimeout(() => {
-      const saved = saveWorkspaceDraft(storageKey, { source, fileName });
-      if (!saved && !saveErrorShownRef.current) {
+      void mutatePreset(presetId, (latest) => ({
+        preset: applyWorkspaceSource(latest, source),
+        changedFields: ["system"],
+        message: "已保存工作台内容",
+      })).catch(() => {
+        if (saveErrorShownRef.current) return;
         saveErrorShownRef.current = true;
-        toast.error("本地草稿保存失败，请检查浏览器存储空间");
-      } else if (saved) {
-        saveErrorShownRef.current = false;
-      }
-    }, 450);
-    return () => window.clearTimeout(timeout);
-  }, [fileName, source, storageKey]);
-
-  useEffect(() => {
-    const flush = () => {
-      const latest = latestDraftRef.current;
-      saveWorkspaceDraft(latest.storageKey, {
-        source: latest.source,
-        fileName: latest.fileName,
+        toast.error("预设保存失败，请重试");
       });
-    };
-    window.addEventListener("pagehide", flush);
-    return () => {
-      window.removeEventListener("pagehide", flush);
-      flush();
-    };
-  }, []);
+    }, 600);
+    return () => window.clearTimeout(timeout);
+  }, [initialSourceValue, presetId, source]);
 
   const addSection = () => {
     setSource((current) => `${current.trimEnd()}\n\n## 新章节\n\n在这里填写内容。\n`);
@@ -242,13 +227,19 @@ export function PresetWorkspace({
     if (!isAIModelConfigReady(assistantConfig)) {
       setAssistantMessages((messages) => [
         ...messages,
-        `你：${value}`,
-        "助手：请先在设置中配置 API Key、Base URL 和模型。",
+        { role: "user", content: value },
+        {
+          role: "assistant",
+          content: "请先在设置中配置 API Key、Base URL 和模型。",
+        },
       ]);
       return;
     }
 
-    setAssistantMessages((messages) => [...messages, `你：${value}`]);
+    setAssistantMessages((messages) => [
+      ...messages,
+      { role: "user", content: value },
+    ]);
     setAssistantInput("");
     setAssistantBusy(true);
 
@@ -263,15 +254,21 @@ export function PresetWorkspace({
       });
       setAssistantMessages((messages) => [
         ...messages,
-        `助手：${result.text || "没有生成可用建议。"}`,
+        {
+          role: "assistant",
+          content: result.text || "没有生成可用建议。",
+        },
       ]);
     } catch (error) {
       setAssistantMessages((messages) => [
         ...messages,
-        `助手：${sanitizeAIErrorMessage(
-          error instanceof Error ? error.message : "请求模型失败",
-          assistantConfig.apiKey,
-        )}`,
+        {
+          role: "assistant",
+          content: sanitizeAIErrorMessage(
+            error instanceof Error ? error.message : "请求模型失败",
+            assistantConfig.apiKey,
+          ),
+        },
       ]);
     } finally {
       setAssistantBusy(false);
@@ -330,13 +327,19 @@ export function PresetWorkspace({
           </button>
         )}
 
-        <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
-          <FileText className="size-3.5 text-muted-foreground" />
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <label
+            htmlFor="workspace-file-name"
+            className="shrink-0 text-xs text-muted-foreground"
+          >
+            导出文件名
+          </label>
           <input
+            id="workspace-file-name"
             value={fileName}
             onChange={(event) => setFileName(event.target.value)}
-            className="min-w-0 max-w-64 flex-1 bg-transparent text-center text-sm font-medium outline-none"
-            aria-label="文件名"
+            className="min-w-0 max-w-64 flex-1 rounded-sm bg-transparent px-1 py-0.5 text-sm outline-none hover:bg-muted focus:bg-muted"
+            aria-label="导出文件名"
           />
         </div>
 
@@ -642,7 +645,7 @@ function AssistantPane({
   reasoningLevels,
   onReasoningChange,
 }: {
-  messages: string[];
+  messages: AssistantMessage[];
   input: string;
   missingSections: string[];
   busy: boolean;
@@ -663,7 +666,7 @@ function AssistantPane({
   return (
     <section className="flex h-full min-h-0 flex-col bg-muted/5">
       <Tabs defaultValue="chat" className="min-h-0 flex-1 gap-0">
-        <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b px-2">
+        <div className="flex h-9 shrink-0 items-center border-b px-2">
           <TabsList variant="line" className="h-7">
             <TabsTrigger value="chat" className="gap-1.5 text-xs">
               <MessageSquare className="size-3" />
@@ -674,13 +677,16 @@ function AssistantPane({
               分析建议
             </TabsTrigger>
           </TabsList>
+        </div>
+        {(() => {
+          const modelPicker = (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-7 min-w-0 max-w-44 gap-1.5 px-2 text-xs"
+                className="h-7 w-full min-w-0 justify-start gap-1.5 px-2 text-xs"
                 aria-label="编辑助手模型与思考等级"
               >
                 <span className="truncate">
@@ -691,10 +697,10 @@ function AssistantPane({
                     {AI_REASONING_LABELS[reasoning]}
                   </span>
                 )}
-                <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+                <ChevronDown className="ml-auto size-3 shrink-0 text-muted-foreground" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-72">
+            <DropdownMenuContent align="start" className="w-72">
               <DropdownMenuLabel>编辑助手模型</DropdownMenuLabel>
               <DropdownMenuRadioGroup value={modelValue} onValueChange={onModelChange}>
                 {modelOptions.map((option) => (
@@ -726,22 +732,34 @@ function AssistantPane({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
-        </div>
-
+          );
+          return (
+            <>
         <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
-            {messages.map((message, index) => (
-              <p
-                key={`${index}:${message}`}
-                className="text-sm leading-6 text-foreground/80"
-              >
-                {message}
-              </p>
-            ))}
+            {messages.map((message, index) =>
+              message.role === "user" ? (
+                <div
+                  key={`${index}:${message.content}`}
+                  className="flex justify-end"
+                >
+                  <p className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-muted px-3 py-1.5 text-sm leading-6">
+                    {message.content}
+                  </p>
+                </div>
+              ) : (
+                <MessageResponse
+                  key={`${index}:${message.content}`}
+                  className="min-w-0 text-sm leading-6 text-foreground/80"
+                >
+                  {message.content}
+                </MessageResponse>
+              ),
+            )}
           </div>
           <div className="border-t p-2">
             <div className="flex items-end gap-1 border bg-background p-1">
-              <textarea
+              <TextareaAutosize
                 value={input}
                 onChange={(event) => onInputChange(event.target.value)}
                 onKeyDown={(event) => {
@@ -750,7 +768,7 @@ function AssistantPane({
                     onSubmit();
                   }
                 }}
-                rows={2}
+                minRows={2}
                 disabled={busy || analysisBusy}
                 placeholder="询问当前文档..."
                 className="min-h-12 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
@@ -766,6 +784,7 @@ function AssistantPane({
                 <Bot className={cn("size-4", busy && "animate-pulse")} />
               </Button>
             </div>
+            <div className="mt-1">{modelPicker}</div>
           </div>
         </TabsContent>
 
@@ -805,9 +824,9 @@ function AssistantPane({
               </p>
             )}
             {analysis ? (
-              <div className="whitespace-pre-wrap text-sm leading-6 text-foreground/85">
+              <MessageResponse className="min-w-0 text-sm leading-6 text-foreground/85">
                 {analysis}
-              </div>
+              </MessageResponse>
             ) : (
               <p className="text-sm leading-6 text-muted-foreground">
                 运行分析后，这里会给出总体性格完整度、设定冲突和按优先级排列的优化方向。
@@ -815,6 +834,9 @@ function AssistantPane({
             )}
           </div>
         </TabsContent>
+            </>
+          );
+        })()}
       </Tabs>
     </section>
   );

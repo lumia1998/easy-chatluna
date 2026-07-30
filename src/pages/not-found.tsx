@@ -10,7 +10,7 @@ export default function NotFoundPage() {
     <main className="flex min-h-full items-center justify-center px-6 py-16">
       <div className="flex max-w-md flex-col items-center text-center">
         <img
-          src="/images/page-not-found.svg"
+          src={`${import.meta.env.BASE_URL}images/page-not-found.svg`}
           alt="页面不存在"
           width="860"
           height="571"

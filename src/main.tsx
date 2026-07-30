@@ -19,11 +19,6 @@ const MainLayout = lazy(() =>
         default: module.MainLayout,
     })),
 );
-const PresetWorkspace = lazy(() =>
-    import("./components/preset-workspace").then((module) => ({
-        default: module.PresetWorkspace,
-    })),
-);
 const router = createHashRouter([
     {
         path: "/",
@@ -35,11 +30,11 @@ const router = createHashRouter([
     },
     {
         path: "/create/main",
-        element: <PresetWorkspace type="main" />,
+        element: <Navigate to="/" replace />,
     },
     {
         path: "/create/character",
-        element: <PresetWorkspace type="character" />,
+        element: <Navigate to="/" replace />,
     },
     {
         element: <MainLayout />,

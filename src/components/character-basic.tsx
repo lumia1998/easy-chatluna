@@ -1,7 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { BufferedInput, BufferedTextarea } from "@/components/ui/buffered-input";
 import { CharacterPresetTemplate } from "@/types/preset";
 import { GetNestedType, NestedKeyOf } from "@/types/util";
 import { Button } from "./ui/button";
@@ -66,48 +65,48 @@ export function CharacterBasic({
                         <CardContent className="space-y-4 pt-6">
                             <div className="grid gap-4 md:grid-cols-2">
                                 <div className="space-y-2">
-                                    <Label htmlFor="name">预设名称</Label>
-                                    <Input
-                                        id="name"
-                                        type="string"
+                                    <Label htmlFor="character-name">
+                                        预设名称
+                                    </Label>
+                                    <BufferedInput
+                                        id="character-name"
                                         value={preset.name}
                                         placeholder="预设名称"
-                                        onChange={(e) => {
-                                            updatePreset?.(
-                                                "name",
-                                                e.target.value
-                                            );
-                                        }}
+                                        onCommit={(value) =>
+                                            updatePreset?.("name", value)
+                                        }
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label htmlFor="type">触发昵称，使用逗号分割</Label>
-                                    <Input
-                                        id="type"
-                                        type="string"
+                                    <Label htmlFor="character-nick-name">
+                                        触发昵称，使用逗号分割
+                                    </Label>
+                                    <BufferedInput
+                                        id="character-nick-name"
                                         value={preset.nick_name.join(", ")}
                                         placeholder="触发的昵称"
                                         className="rounded-lg"
-                                        onChange={(e) =>
+                                        onCommit={(value) =>
                                             updatePreset?.(
                                                 "nick_name",
-                                                e.target.value.split(",").map((s) => s.trim())
+                                                value
+                                                    .split(",")
+                                                    .map((s) => s.trim())
                                             )
                                         }
                                     />
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="mute">禁言词，使用逗号分割</Label>
-                                    <Input
+                                    <BufferedInput
                                         id="mute"
-                                        type="string"
-                                        value={preset.mute_keyword?.join(", ") || []}
+                                        value={preset.mute_keyword?.join(", ") ?? ""}
                                         placeholder="触发的昵称"
                                         className="rounded-lg"
-                                        onChange={(e) =>
+                                        onCommit={(value) =>
                                             updatePreset?.(
                                                 "mute_keyword",
-                                                e.target.value.split(",").map((s) => s.trim())
+                                                value.split(",").map((s) => s.trim())
                                             )
                                         }
                                     />
@@ -117,16 +116,16 @@ export function CharacterBasic({
                                 <Label htmlFor="description">
                                     状态信息
                                 </Label>
-                                <Textarea
+                                <BufferedTextarea
                                     id="description"
                                     placeholder="人物的状态模版信息"
                                     className="min-h-[100px] rounded-lg"
                                     rows={20}
-                                    value={preset.status}
-                                    onChange={(e) =>
+                                    value={preset.status ?? ""}
+                                    onCommit={(value) =>
                                         updatePreset?.(
                                             "status",
-                                            e.target.value
+                                            value
                                         )
                                     }
                                 />

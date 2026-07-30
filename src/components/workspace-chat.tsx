@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import TextareaAutosize from "react-textarea-autosize";
 import { generateText } from "ai";
 import {
   ArrowUp,
@@ -13,6 +14,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { MessageResponse } from "@/components/ai-elements/message";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +29,7 @@ import { useWorkspaceChat } from "@/hooks/use-preset";
 import { useScopedAIModel } from "@/hooks/use-scoped-ai-model";
 import { createLanguageModelFromConfig } from "@/lib/ai/model-provider";
 import { isAIModelConfigReady } from "@/lib/ai/model-config";
+import { sanitizeAIErrorMessage } from "@/lib/ai/error-sanitize";
 import {
   buildChatLunaDocsSystemPrompt,
   retrieveChatLunaDocs,
@@ -53,10 +56,10 @@ const MODEL_DOCS = [
 
 export function WorkspaceChat({
   conversationId,
-  onOpenDraft,
+  onCreatePreset,
 }: {
   conversationId: string;
-  onOpenDraft: (type: "main" | "character") => void;
+  onCreatePreset: (type: "main" | "character") => void;
 }) {
   const conversation = useWorkspaceChat(conversationId);
   const [input, setInput] = useState("");
@@ -149,7 +152,10 @@ export function WorkspaceChat({
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          content: error instanceof Error ? error.message : "请求模型失败。",
+          content:
+            error instanceof Error
+              ? sanitizeAIErrorMessage(error.message, selectedConfig?.apiKey)
+              : "请求模型失败。",
         },
       ]);
       if (!saved) setInput(value);
@@ -167,7 +173,7 @@ export function WorkspaceChat({
   return (
     <section className="flex h-full min-h-0 flex-col bg-background">
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-4 py-8 sm:px-7">
+        <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-4 py-8 sm:px-6">
           {messages.length === 0 ? (
             <div className="my-auto pb-16">
               <p className="mb-2 text-sm text-muted-foreground">ChatLuna 工作台</p>
@@ -175,10 +181,10 @@ export function WorkspaceChat({
                 你好，今天想创建什么？
               </h1>
               <div className="mt-7 flex flex-wrap gap-2">
-                <Button variant="outline" onClick={() => onOpenDraft("main")}>
+                <Button variant="outline" onClick={() => onCreatePreset("main")}>
                   <FileCode2 />创建主插件预设
                 </Button>
-                <Button variant="outline" onClick={() => onOpenDraft("character")}>
+                <Button variant="outline" onClick={() => onCreatePreset("character")}>
                   <Sparkles />创建伪装预设
                 </Button>
               </div>
@@ -207,32 +213,32 @@ export function WorkspaceChat({
               </nav>
             </div>
           ) : (
-            <div className="space-y-7 pb-8">
-              {messages.map((message) => (
-                <article key={message.id} className="grid grid-cols-[28px_minmax(0,1fr)] gap-3">
-                  <div className="flex size-7 items-center justify-center rounded-md border bg-muted/40 text-xs font-medium">
-                    {message.role === "assistant" ? <Bot className="size-3.5" /> : "你"}
-                  </div>
-                  <div className="min-w-0 whitespace-pre-wrap pt-0.5 text-[15px] leading-7">
-                    {message.content}
+            <div className="space-y-6 pb-8">
+              {messages.map((message) =>
+                message.role === "user" ? (
+                  <article key={message.id} className="flex justify-end">
+                    <div className="max-w-[85%] whitespace-pre-wrap rounded-3xl bg-muted px-4 py-2.5 text-[15px] leading-7">
+                      {message.content}
+                    </div>
+                  </article>
+                ) : (
+                  <article key={message.id} className="min-w-0">
+                    <MessageResponse className="text-[15px] leading-7">
+                      {message.content}
+                    </MessageResponse>
                     <SourceList sources={message.sources} />
                     {message.retrievalWarning && (
                       <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
                         {message.retrievalWarning}，本次回答未使用文档引用。
                       </p>
                     )}
-                  </div>
-                </article>
-              ))}
+                  </article>
+                ),
+              )}
               {busy && (
-                <div className="grid grid-cols-[28px_1fr] gap-3 text-muted-foreground">
-                  <div className="flex size-7 items-center justify-center rounded-md border bg-muted/40">
-                    <Bot className="size-3.5" />
-                  </div>
-                  <div className="flex items-center gap-2 pt-1 text-sm">
-                    <LoaderCircle className="size-4 animate-spin" />
-                    {busyPhase === "retrieving" ? "正在检索 ChatLuna 文档" : "正在生成回答"}
-                  </div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <LoaderCircle className="size-4 animate-spin" />
+                  {busyPhase === "retrieving" ? "正在检索 ChatLuna 文档" : "正在生成回答"}
                 </div>
               )}
             </div>
@@ -240,9 +246,9 @@ export function WorkspaceChat({
         </div>
       </main>
 
-      <div className="shrink-0 bg-background px-3 py-3 sm:px-5">
-        <div className="mx-auto w-full max-w-4xl border-x border-b bg-background">
-          <textarea
+      <div className="shrink-0 bg-background px-4 pb-4 sm:px-6">
+        <div className="mx-auto w-full max-w-3xl rounded-3xl border bg-background shadow-sm transition-shadow focus-within:shadow-md">
+          <TextareaAutosize
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
@@ -251,15 +257,20 @@ export function WorkspaceChat({
                 void send();
               }
             }}
-            rows={2}
+            minRows={1}
             placeholder="输入问题、角色设定或你想实现的效果"
-            className="min-h-16 w-full resize-none bg-transparent px-4 py-3 text-sm leading-6 outline-none"
+            className="max-h-52 min-h-12 w-full resize-none bg-transparent px-5 pt-4 text-[15px] leading-6 outline-none placeholder:text-muted-foreground"
             aria-label="对话消息"
           />
-          <div className="flex h-10 items-center justify-between border-t px-2">
+          <div className="flex items-center justify-between gap-2 px-3 pb-2.5 pt-1">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button type="button" variant="ghost" size="sm" className="max-w-64 gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 max-w-64 gap-1.5 rounded-full px-3 text-muted-foreground hover:text-foreground"
+                >
                   <Bot className="size-4" />
                   <span className="truncate">{selectedConfig?.model || "选择模型"}</span>
                   {reasoning && (
@@ -272,6 +283,12 @@ export function WorkspaceChat({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="max-h-[min(32rem,70vh)] w-72 overflow-y-auto">
                 <DropdownMenuLabel>当前会话模型</DropdownMenuLabel>
+                {modelOptions.length === 0 && (
+                  <p className="px-2 py-1.5 text-xs leading-5 text-muted-foreground">
+                    还没有可用模型。打开右上角「设置 → AI 模型」新增配置，填入
+                    API Key 后拉取或手动输入模型名。
+                  </p>
+                )}
                 <DropdownMenuRadioGroup
                   value={selectionValue}
                   onValueChange={setSelectionValue}
@@ -301,8 +318,20 @@ export function WorkspaceChat({
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button type="button" size="icon" className="size-8" disabled={!input.trim() || busy} onClick={() => void send()} aria-label="发送" title="发送">
-              <ArrowUp className="size-4" />
+            <Button
+              type="button"
+              size="icon"
+              className="size-8 shrink-0 rounded-full"
+              disabled={!input.trim() || busy}
+              onClick={() => void send()}
+              aria-label="发送"
+              title="发送"
+            >
+              {busy ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <ArrowUp className="size-4" />
+              )}
             </Button>
           </div>
         </div>

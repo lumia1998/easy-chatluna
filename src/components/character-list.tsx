@@ -82,8 +82,8 @@ export function CharacterList({
         <img
           width="100"
           height="100"
-          src="/images/empty-state.svg"
-          alt="No presets"
+          src={`${import.meta.env.BASE_URL}images/empty-state.svg`}
+          alt="没有预设"
           className="w-48 h-48 mb-4"
         />
         <div className="text-2xl font-bold tracking-tight">没有预设</div>
@@ -208,8 +208,12 @@ export function CharacterList({
                       <DropdownMenuItem
                         onClick={async () => {
                           const preset = await getPreset(character.id);
-                          // TODO: toast error
-                          if (!preset) return;
+                          if (!preset) {
+                            toast.error("导出失败", {
+                              description: "该预设可能已被删除，请刷新后重试。",
+                            });
+                            return;
+                          }
                           exportPreset(preset);
                         }}
                       >

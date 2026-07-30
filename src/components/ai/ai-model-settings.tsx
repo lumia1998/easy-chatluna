@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useAIModelConfigs } from "@/hooks/use-ai-model-configs";
 import { fetchAIModelIds } from "@/lib/ai/model-list";
+import { sanitizeAIErrorMessage } from "@/lib/ai/error-sanitize";
 import {
   AI_MODEL_SECRET_PERSISTENCE_ERROR_EVENT,
   AI_PROVIDER_LABELS,
@@ -82,14 +83,23 @@ export function AIModelSettings() {
     setLoadingConfigId(selected.id);
     try {
       const nextModels = await fetchAIModelIds(selected);
-      updateConfig(selected.id, { availableModels: nextModels });
+      updateConfig(selected.id, {
+        availableModels: nextModels,
+        ...(selected.model.trim() || nextModels.length === 0
+          ? {}
+          : { model: nextModels[0] }),
+      });
       if (nextModels.length === 0) {
         toast.warning("接口未返回可用模型");
       } else {
         toast.success("模型列表已更新");
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "拉取模型失败");
+      toast.error(
+        error instanceof Error
+          ? sanitizeAIErrorMessage(error.message, selected.apiKey)
+          : "拉取模型失败",
+      );
     } finally {
       setLoadingConfigId(null);
     }
@@ -266,7 +276,7 @@ export function AIModelSettings() {
             <div className="grid gap-2 border-t pt-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
-                  <Label>可用模型</Label>
+                  <Label htmlFor="ai-config-model">使用的模型</Label>
                   {models.length > 0 && (
                     <span className="truncate text-xs text-muted-foreground">
                       已获取 {models.length} 个
@@ -289,8 +299,22 @@ export function AIModelSettings() {
                   拉取模型
                 </Button>
               </div>
+              <Input
+                id="ai-config-model"
+                list="ai-config-model-options"
+                value={selected.model}
+                onChange={(event) =>
+                  updateConfig(selected.id, { model: event.target.value })
+                }
+                placeholder="手动输入模型名，例如 gpt-4o"
+              />
+              <datalist id="ai-config-model-options">
+                {models.map((model) => (
+                  <option key={model} value={model} />
+                ))}
+              </datalist>
               <p className="text-xs leading-5 text-muted-foreground">
-                设置仅同步模型列表；当前使用的模型请直接在首页或对话输入框下方切换。
+                接口不支持模型列表时，可直接手动填写模型名。填好的模型会出现在首页和对话输入框下方的切换菜单里。
               </p>
             </div>
           </div>

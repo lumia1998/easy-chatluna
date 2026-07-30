@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
+import { BufferedInput } from "@/components/ui/buffered-input";
 import { Switch } from "./ui/switch";
 import { RawPreset } from "@/types/preset";
 import { GetNestedType, NestedKeyOf } from "@/types/util";
@@ -67,35 +67,34 @@ export function CharacterMainBasic({
                         <CardContent className="space-y-4 pt-6">
                             <div className="grid gap-4 md:grid-cols-2">
                                 <div className="space-y-2">
-                                    <Label htmlFor="name">预设名称</Label>
-                                    <Input
-                                        id="name"
-                                        type="string"
+                                    <Label htmlFor="main-keywords">
+                                        预设名称
+                                    </Label>
+                                    <BufferedInput
+                                        id="main-keywords"
                                         value={preset.keywords.join(", ")}
                                         placeholder="预设名称"
-                                        onChange={(e) => {
-                                            const keywords =
-                                                e.target.value.split(",").map(s => s.trim())
+                                        onCommit={(value) =>
                                             updatePreset?.(
                                                 "keywords",
-                                                keywords
-                                            );
-                                        }}
+                                                value
+                                                    .split(",")
+                                                    .map((s) => s.trim())
+                                            )
+                                        }
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label htmlFor="type">版本号（可选）</Label>
-                                    <Input
-                                        id="type"
-                                        type="string"
-                                        value={preset.version}
+                                    <Label htmlFor="main-version">
+                                        版本号（可选）
+                                    </Label>
+                                    <BufferedInput
+                                        id="main-version"
+                                        value={preset.version ?? ""}
                                         placeholder="预设的版本号"
                                         className="rounded-lg"
-                                        onChange={(e) =>
-                                            updatePreset?.(
-                                                "version",
-                                                e.target.value
-                                            )
+                                        onCommit={(value) =>
+                                            updatePreset?.("version", value)
                                         }
                                     />
                                 </div>
@@ -156,36 +155,36 @@ export function CharacterMainBasic({
                                     <Label htmlFor="prefix">
                                         内容主体前缀（prefix）
                                     </Label>
-                                    <Input
+                                    <BufferedInput
                                         id="prefix"
-                                        type="string"
                                         className="rounded-lg"
                                         value={
-                                            preset.config?.postHandler?.prefix
+                                            preset.config?.postHandler
+                                                ?.prefix ?? ""
                                         }
-                                        onChange={(e) =>
+                                        onCommit={(value) =>
                                             updatePreset?.(
                                                 "config.postHandler.prefix",
-                                                e.target.value
+                                                value
                                             )
                                         }
                                     />
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="suffix">
-                                        内容主体后缀（prefix）
+                                        内容主体后缀（postfix）
                                     </Label>
-                                    <Input
+                                    <BufferedInput
                                         id="suffix"
-                                        type="string"
                                         value={
-                                            preset.config?.postHandler?.postfix
+                                            preset.config?.postHandler
+                                                ?.postfix ?? ""
                                         }
                                         className="rounded-lg"
-                                        onChange={(e) =>
+                                        onCommit={(value) =>
                                             updatePreset?.(
                                                 "config.postHandler.postfix",
-                                                e.target.value
+                                                value
                                             )
                                         }
                                     />
@@ -199,6 +198,10 @@ export function CharacterMainBasic({
                                     </Label>
                                     <Switch
                                         id="censor"
+                                        checked={
+                                            preset.config?.postHandler
+                                                ?.censor ?? false
+                                        }
                                         onCheckedChange={(e) => {
                                             updatePreset?.(
                                                 "config.postHandler.censor",
@@ -242,12 +245,11 @@ export function CharacterMainBasic({
                         <CardContent className="space-y-4 pt-6">
                             <div className="grid gap-4 md:grid-cols-2">
                                 <div className="space-y-2">
-                                    <Label htmlFor="name">
+                                    <Label htmlFor="knowledge-list">
                                         使用的知识库列表，用逗号分割
                                     </Label>
-                                    <Input
-                                        id="name"
-                                        type="string"
+                                    <BufferedInput
+                                        id="knowledge-list"
                                         value={(() => {
                                             const id =
                                                 preset.knowledge?.knowledge;
@@ -259,15 +261,13 @@ export function CharacterMainBasic({
                                                 return "";
                                             }
                                         })()}
-                                        placeholder="预设名称"
-                                        onChange={(e) => {
-                                            const keywords =
-                                                e.target.value.split(",");
+                                        placeholder="知识库名称"
+                                        onCommit={(value) =>
                                             updatePreset?.(
                                                 "knowledge.knowledge",
-                                                keywords
-                                            );
-                                        }}
+                                                value.split(",")
+                                            )
+                                        }
                                     />
                                 </div>
                             </div>
