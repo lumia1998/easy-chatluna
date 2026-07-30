@@ -54,6 +54,11 @@ const MODEL_DOCS = [
   ["其他模型接入", "https://chatluna.chat/guide/configure-model-platform/introduction.html"],
 ] as const;
 
+const PRIMARY_DOCS = [
+  ["ChatLuna 文档", "https://chatluna.chat/guide/introduction.html"],
+  ["Character 伪装文档", "https://chatluna.chat/ecosystem/other/character.html"],
+] as const;
+
 export function WorkspaceChat({
   conversationId,
   onCreatePreset,
@@ -201,15 +206,18 @@ export function WorkspaceChat({
                     <ExternalLink className="size-3" />
                   </a>
                 ))}
-                <a
-                  href="https://chatluna.chat/guide"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
-                >
-                  <BookOpen className="size-3.5" />
-                  ChatLuna 文档
-                </a>
+                {PRIMARY_DOCS.map(([label, href]) => (
+                  <a
+                    key={href}
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+                  >
+                    <BookOpen className="size-3.5" />
+                    {label}
+                  </a>
+                ))}
               </nav>
             </div>
           ) : (

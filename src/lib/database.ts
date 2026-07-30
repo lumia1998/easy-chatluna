@@ -120,3 +120,33 @@ db.version(4).stores({
   presetVersions: "id, presetId, [presetId+createdAt], createdAt",
   workspaceChats: "id, updatedAt, createdAt",
 });
+
+export type StorageProbeResult =
+  | { ok: true }
+  | { ok: false; reason: "unsupported" | "blocked"; detail: string };
+
+/**
+ * Open the database once at startup so a browser that forbids IndexedDB
+ * (Safari private mode, disabled site data) surfaces one clear message
+ * instead of every later query rejecting on its own.
+ */
+export async function probeStorage(): Promise<StorageProbeResult> {
+  if (typeof indexedDB === "undefined") {
+    return {
+      ok: false,
+      reason: "unsupported",
+      detail: "当前浏览器未提供 IndexedDB。",
+    };
+  }
+  try {
+    await db.open();
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "blocked",
+      detail:
+        error instanceof Error ? error.message : "无法打开本地数据库。",
+    };
+  }
+}

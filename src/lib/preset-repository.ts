@@ -67,6 +67,22 @@ export function createVersionRecord(
 }
 
 /**
+ * 乐观锁冲突。单独成类，让调用方能把「预设被改过」和真正的写入故障区分开，
+ * 从而保留已经花费模型调用得到的生成结果，而不是一并丢弃。
+ */
+export class PresetRevisionConflictError extends Error {
+  readonly expectedRevision: number;
+  readonly actualRevision: number;
+
+  constructor(expectedRevision: number, actualRevision: number) {
+    super("生成期间预设已变化，未应用过期结果");
+    this.name = "PresetRevisionConflictError";
+    this.expectedRevision = expectedRevision;
+    this.actualRevision = actualRevision;
+  }
+}
+
+/**
  * 原子化读-改-写事务。
  * 仅在事务内执行本地 get/validate/put，禁止在其中进行网络或模型 await 操作。
  * 返回最终写入数据库的 PresetModel（含 lastModified）。
@@ -92,7 +108,10 @@ export async function withPresetTransaction(
       options.expectedRevision !== undefined &&
       currentRevision !== options.expectedRevision
     ) {
-      throw new Error("生成期间预设已变化，未应用过期结果");
+      throw new PresetRevisionConflictError(
+        options.expectedRevision,
+        currentRevision,
+      );
     }
 
     const result = mutator(latest);

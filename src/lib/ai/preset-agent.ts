@@ -16,6 +16,7 @@ import {
   readPresetOrThrow,
   type PresetMutationResult,
 } from "@/lib/preset-mutation-queue";
+import { PresetRevisionConflictError } from "@/lib/preset-repository";
 import type {
   AIModelConfig,
   AIReasoningLevel,
@@ -959,6 +960,20 @@ function createPresetTools(
     },
   });
 
+  /**
+   * On an optimistic-lock conflict the mutator never ran, so the only thing lost
+   * is the model output we already paid for. Carry it on the error so the caller
+   * can offer it for recovery instead of silently dropping it.
+   */
+  function attachDiscardedGeneration(error: unknown, input: unknown): unknown {
+    if (error instanceof PresetRevisionConflictError) {
+      (error as PresetRevisionConflictError & {
+        discardedGeneration?: unknown;
+      }).discardedGeneration = input;
+    }
+    return error;
+  }
+
   const replaceGeneratedMainPreset = tool({
     description:
       "Replace the generated core fields of a main plugin preset: keywords, prompts, and format_user_prompt. Preserves world_lores, authors_note, knowledge, config, and version. Used by Generate. Format validation and YAML preflight run before write.",
@@ -1026,7 +1041,7 @@ function createPresetTools(
         return result;
       } catch (error) {
         generateWriteGuard.releaseOnFailure();
-        throw error;
+        throw attachDiscardedGeneration(error, input);
       }
     },
   });
@@ -1097,7 +1112,7 @@ function createPresetTools(
         return result;
       } catch (error) {
         generateWriteGuard.releaseOnFailure();
-        throw error;
+        throw attachDiscardedGeneration(error, input);
       }
     },
   });

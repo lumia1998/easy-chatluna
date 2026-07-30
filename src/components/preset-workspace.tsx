@@ -69,6 +69,58 @@ import { toast } from "sonner";
 
 type WorkspacePane = "outline" | "editor" | "reference" | "assistant";
 
+/**
+ * Full-document audit prompt. Scoped to identity logic on purpose: tone and
+ * output format are applied later by the format templates, so flagging them
+ * here would only produce advice the generate step overwrites.
+ */
+const ANALYSIS_SYSTEM_PROMPT = `# Role: AI 角色预设内容诊断专家 (Character Content Auditor)
+
+## Profile
+你是一位专注于 AI 角色人设（Character Identity 与 Logic）逻辑自洽性的审查专家。你的任务是分析用户提供的预设草稿，只从**“人设内容”、“逻辑自洽性”和“维度完整度”**进行深度排查。
+
+你的工作**不是**替用户重写预设，也不是关心语气格式（因为后续会有统一格式模板），而是像一个严谨的剧本编辑，帮用户找出设定上的纰漏，并提出具体修改与补充建议。
+
+---
+
+## 审查核心维度（仅关注内容）
+
+1. **逻辑冲突排查 (Contradictions)**
+   - 检查性格、身份、行为模式、喜恶之间是否存在矛盾（例如：一方面说“极度高冷”，另一方面又说“会热心解答陌生人的所有问题”）。
+   - 检查背景设定与言行逻辑是否匹配。
+
+2. **核心维度缺失 (Missing Dimensions)**
+   - 是否缺少让角色立体的关键要素？（如：情绪触发点/Triggers、价值观动机、处理特定情境时的行为逻辑等）。
+
+3. **人设饱满度与具体度 (Depth 与 Specificity)**
+   - 人设描述是仅停留在抽象的形容词堆砌（如“善良”、“叛逆”），还是有具体体现？
+   - 是否需要补充具体的细节以增强 AI 在特定场景下的表现？
+
+4. **人设与对话范例的匹配度 (Example Alignment)**
+   - 提供的对话范例是否真正体现了前面设定的性格与行为逻辑？范例与人设文本是否存在冲突？
+
+---
+
+## 输出诊断报告要求
+
+请严格按照以下格式输出你的分析结果（注意：**不要直接帮用户重写预设**，只需给出分析与建议）：
+
+### 1. 整体评估与核心结论
+- **一句话评价**：（概括当前设定的完成度）
+- **核心优化方向**：（简述最需要调整的 1-2 个方向）
+
+### 2. 逻辑矛盾排查（如无矛盾可写无）
+- **存在问题**：[指出具体哪两部分设定存在冲突，以及为什么冲突]
+- **修改建议**：[建议用户如何调整设定以消除冲突]
+
+### 3. 需要补充/深化的内容维度
+- **建议补充的维度**：[指出缺失了哪个维度，例如：情绪触发点、知识/行为边界]
+- **具体建议**：[告诉用户应该补充什么方向的具体内容，能让 AI 理解得更透彻]
+
+### 4. 对话范例审查
+- **范例匹配度分析**：[分析范例是否契合人设]
+- **调整建议**：[如果不匹配，建议用户增加或修改什么场景下的对话范例]`;
+
 interface AssistantMessage {
   role: "user" | "assistant";
   content: string;
@@ -141,7 +193,7 @@ export function StoredPresetWorkspace({
       embedded={embedded}
       presetId={presetId}
       initialSource={presetToWorkspaceSource(preset)}
-      initialFileName={`${preset.name}.md`}
+      initialFileName={preset.name}
     />
   );
 }
@@ -289,9 +341,9 @@ function PresetWorkspace({
       const result = await generateText({
         model: createLanguageModelFromConfig(assistantConfig),
         reasoning: assistantReasoning,
-        maxOutputTokens: 1200,
-        system:
-          "你是 ChatLuna 角色预设评审助手。分析整份预设，不重写用户原文，不虚构用户没有提供的设定。重点判断角色核心是否清楚、性格是否完整且一致、兴趣是否支撑角色、聊天风格和聊天行为是否可执行、各部分是否冲突或重复。输出简洁 Markdown，依次包含：总体判断、性格完整性、行为一致性、缺失或冲突、按优先级排列的优化方向。每条建议必须指出对应章节和具体补充方向。",
+        // The audit report has four required sections; 1200 truncated it mid-report.
+        maxOutputTokens: 3000,
+        system: ANALYSIS_SYSTEM_PROMPT,
         prompt: `预设类型：${type === "main" ? "主插件预设" : "伪装预设"}\n请分析以下完整文档：\n\n---\n${sourceSnapshot}\n---`,
       });
       setAnalysisResult(result.text || "模型没有返回分析结果。");
@@ -338,9 +390,16 @@ function PresetWorkspace({
             id="workspace-file-name"
             value={fileName}
             onChange={(event) => setFileName(event.target.value)}
-            className="min-w-0 max-w-64 flex-1 rounded-sm bg-transparent px-1 py-0.5 text-sm outline-none hover:bg-muted focus:bg-muted"
+            className="min-w-0 max-w-56 flex-1 rounded-sm bg-transparent px-1 py-0.5 text-sm outline-none hover:bg-muted focus:bg-muted"
             aria-label="导出文件名"
+            placeholder="预设名称"
           />
+          <span
+            className="shrink-0 text-xs text-muted-foreground"
+            aria-hidden="true"
+          >
+            .yml
+          </span>
         </div>
 
         <div className="flex items-center justify-end gap-1">

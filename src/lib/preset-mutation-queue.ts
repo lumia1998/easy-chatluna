@@ -60,16 +60,17 @@ export async function mutatePreset(
   } = {},
 ): Promise<PresetMutationResult> {
   return enqueue(presetId, async () => {
-    let meta: Omit<
-      PresetMutatorOutput,
-      "preset"
-    > | null = null;
+    // Held in a box: TypeScript cannot narrow a `let` assigned inside a
+    // callback, so a bare local would collapse to `never` after the null check.
+    const captured: { meta: Omit<PresetMutatorOutput, "preset"> | null } = {
+      meta: null,
+    };
 
     const stored = await withPresetTransaction(
       presetId,
       (latest) => {
         const output = mutator(latest);
-        meta = {
+        captured.meta = {
           changedFields: output.changedFields,
           message: output.message,
           warnings: output.warnings,
@@ -80,6 +81,7 @@ export async function mutatePreset(
       options,
     );
 
+    const meta = captured.meta;
     if (!meta) {
       throw new Error("内部错误：mutation 未产生结果");
     }
@@ -119,6 +121,7 @@ export async function deletePresetAndData(presetId: string): Promise<void> {
   await enqueue(presetId, () => deletePreset(presetId));
   try {
     localStorage.removeItem(`chatluna_main_ai_draft:${presetId}`);
+    localStorage.removeItem(`chatluna_discarded_generation:${presetId}`);
   } catch {
     // Storage cleanup is best-effort after the database transaction succeeds.
   }

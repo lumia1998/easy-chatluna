@@ -55,15 +55,16 @@ export function PresetPreviewDialog({ preset, open, onOpenChange }: PresetPrevie
         if (cancelled || !container) return;
 
         // 创建编辑器实例
-        editorInstance = monaco.editor.create(container, {
+        const createdEditor = monaco.editor.create(container, {
           value: presetYaml,
           language: "yaml",
           readOnly: true,
           theme: theme.resolvedTheme === "dark" ? "vs-dark" : "vs-light",
           automaticLayout: true,
         });
-        editorModel = editorInstance.getModel();
-        editorInstanceRef.current = editorInstance;
+        editorInstance = createdEditor;
+        editorModel = createdEditor.getModel();
+        editorInstanceRef.current = createdEditor;
 
         // 响应式布局
         resizeObserver = new ResizeObserver(() => {
@@ -90,12 +91,12 @@ export function PresetPreviewDialog({ preset, open, onOpenChange }: PresetPrevie
           if (isMobile) {
             const dialogContentRect = dialogContentRef.current?.getBoundingClientRect();
 
-            editorInstance.layout({
+            createdEditor.layout({
               width: (dialogContentRect?.width || 0) * 0.9,
               height: (dialogContentRect?.height || 0) * 0.8,
             });
           } else {
-            editorInstance.layout();
+            createdEditor.layout();
           }
         }
 

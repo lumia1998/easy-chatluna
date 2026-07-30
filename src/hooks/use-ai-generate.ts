@@ -12,6 +12,7 @@ import {
   isAIModelConfigReady,
 } from "@/lib/ai/model-config";
 import { sanitizeAIErrorMessage } from "@/lib/ai/error-sanitize";
+import { PresetRevisionConflictError } from "@/lib/preset-repository";
 import type { CharacterPresetTemplate } from "@/types/preset";
 import type {
   AIGenerateLogEntry,
@@ -26,6 +27,37 @@ const MAIN_FORMAT_LABELS: Record<MainPresetFormat, string> = {
   markdown: "Markdown 格式",
   koishi: "Koishi 消息渲染格式",
 };
+
+export const DISCARDED_GENERATION_STORAGE_PREFIX =
+  "chatluna_discarded_generation:";
+
+/**
+ * A revision conflict means the write was refused, not that the model failed.
+ * Persist the unapplied output so a concurrent edit cannot cost the user a
+ * paid generation. Returns whether anything was stashed.
+ */
+function stashDiscardedGeneration(presetId: string, error: unknown): boolean {
+  if (!(error instanceof PresetRevisionConflictError)) return false;
+  const payload = (
+    error as PresetRevisionConflictError & { discardedGeneration?: unknown }
+  ).discardedGeneration;
+  if (payload === undefined) return false;
+  try {
+    localStorage.setItem(
+      `${DISCARDED_GENERATION_STORAGE_PREFIX}${presetId}`,
+      JSON.stringify({
+        savedAt: Date.now(),
+        expectedRevision: error.expectedRevision,
+        actualRevision: error.actualRevision,
+        generation: payload,
+      }),
+    );
+    return true;
+  } catch {
+    // Stashing is best-effort; a full quota must not mask the original error.
+    return false;
+  }
+}
 
 const CHARACTER_FORMAT_LABELS: Record<CharacterPresetFormat, string> = {
   "tool-call": "工具调用格式",
@@ -156,8 +188,19 @@ export function useAIGenerate(
           error instanceof Error ? error.message : String(error ?? "未知错误"),
           apiKey,
         );
+        const stashed = stashDiscardedGeneration(presetId, error);
         addLog(`生成失败：${message}`, "error");
-        toast.error("AI 生成失败", { description: message });
+        if (stashed) {
+          addLog(
+            "生成结果已暂存到本地，可在预设未被再次修改后重试生成，或从暂存中手动取用。",
+            "warning",
+          );
+          toast.error("预设在生成期间被修改，未覆盖你的改动", {
+            description: `${message}（生成结果已暂存，不会丢失）`,
+          });
+        } else {
+          toast.error("AI 生成失败", { description: message });
+        }
       } finally {
         generationLockRef.current = false;
         setIsGenerating(false);

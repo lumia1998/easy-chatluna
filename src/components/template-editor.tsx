@@ -564,7 +564,7 @@ function createEditorTheme(
           : "transparent",
         fontSize: "0.875rem",
         overflow: "hidden",
-        height: fillHeight ? "100%" : undefined,
+        height: fillHeight ? "100%" : null,
       },
       "&.cm-focused": {
         outline: "none",
@@ -574,7 +574,7 @@ function createEditorTheme(
         minHeight: fillHeight
           ? "100%"
           : `${Math.max(minRows, 3) * 1.5}rem`,
-        height: fillHeight ? "100%" : undefined,
+        height: fillHeight ? "100%" : null,
         maxHeight: fillHeight
           ? "none"
           : maxRows

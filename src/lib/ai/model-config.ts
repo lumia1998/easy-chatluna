@@ -337,7 +337,7 @@ export function getActiveAIModelConfig(
 
 export function isAIModelConfigReady(
   config: AIModelConfig | null | undefined,
-): boolean {
+): config is AIModelConfig {
   if (!config) {
     return false;
   }
