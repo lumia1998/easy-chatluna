@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Yarn (nodeLinker: node-modules — only local caches land here)
+.yarn/install-state.gz
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

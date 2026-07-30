@@ -8,6 +8,7 @@ import {
   BookOpen,
   Bot,
   ChevronDown,
+  CircleAlert,
   ExternalLink,
   FileCode2,
   LoaderCircle,
@@ -58,6 +59,9 @@ const PRIMARY_DOCS = [
   ["ChatLuna 文档", "https://chatluna.chat/guide/introduction.html"],
   ["Character 伪装文档", "https://chatluna.chat/ecosystem/other/character.html"],
 ] as const;
+
+const ERROR_CODE_DOC =
+  "https://chatluna.chat/guide/faq/error_code.html";
 
 export function WorkspaceChat({
   conversationId,
@@ -157,10 +161,14 @@ export function WorkspaceChat({
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          content:
+          // Point at the error code table here too: this message is where the
+          // user actually meets the failure, and the empty state it also lives
+          // on is hidden once a conversation has started.
+          content: `${
             error instanceof Error
               ? sanitizeAIErrorMessage(error.message, selectedConfig?.apiKey)
-              : "请求模型失败。",
+              : "请求模型失败。"
+          }\n\n对照 [ChatLuna 错误码表](${ERROR_CODE_DOC}) 可以定位常见原因。`,
         },
       ]);
       if (!saved) setInput(value);
@@ -218,6 +226,15 @@ export function WorkspaceChat({
                     {label}
                   </a>
                 ))}
+                <a
+                  href={ERROR_CODE_DOC}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground hover:underline"
+                >
+                  <CircleAlert className="size-3.5" />
+                  错误码表 / 常见错误
+                </a>
               </nav>
             </div>
           ) : (
