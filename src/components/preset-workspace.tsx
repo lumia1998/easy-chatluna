@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import { generateText } from "ai";
 import { useNavigate } from "react-router";
@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Download,
   FileText,
+  GripVertical,
   ListTree,
   LoaderCircle,
   MessageSquare,
@@ -18,8 +19,10 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Plus,
+  Quote,
   Settings2,
   Sparkles,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -122,6 +125,7 @@ const ANALYSIS_SYSTEM_PROMPT = `# Role: AI 角色预设内容诊断专家 (Chara
 - **调整建议**：[如果不匹配，建议用户增加或修改什么场景下的对话范例]`;
 
 interface AssistantMessage {
+  id: string;
   role: "user" | "assistant";
   content: string;
 }
@@ -234,13 +238,23 @@ function PresetWorkspace({
   const [mobilePane, setMobilePane] = useState<WorkspacePane>("editor");
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([
-    { role: "assistant", content: "我会保留你的原始设定，只以补丁形式提供建议。" },
+    { id: crypto.randomUUID(), role: "assistant", content: "我会保留你的原始设定，只以补丁形式提供建议。" },
   ]);
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [analysisResult, setAnalysisResult] = useState("");
   const [analysisSource, setAnalysisSource] = useState("");
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [referenceCollapsed, setReferenceCollapsed] = useState(false);
+  // 面板拖拽尺寸：[outline, editor, reference, assistant]，单位是 fr
+  const [panelSizes, setPanelSizes] = useState<[number, number, number, number]>([18, 32, 32, 18]);
+  // 编辑器光标所在行（1-based，用于大纲动态高亮）
+  const [editorCursorLine, setEditorCursorLine] = useState(0);
+  // 编辑器当前选中文字（用于联动助手输入）
+  const [editorSelectedText, setEditorSelectedText] = useState("");
+  // 指向 TemplateEditor 的 scrollToLine API
+  const scrollToLineRef = useRef<((line: number) => void) | null>(null);
+  // 容器 ref，用于拖拽时计算宽度百分比
+  const mainPanelRef = useRef<HTMLDivElement>(null);
 
   const outline = useMemo(() => parseOutline(source), [source]);
   const missingSections = useMemo(
@@ -275,12 +289,13 @@ function PresetWorkspace({
 
   const askAssistant = async () => {
     const value = assistantInput.trim();
-    if (!value || assistantBusy) return;
+    if (!value || assistantBusy || analysisBusy) return;
     if (!isAIModelConfigReady(assistantConfig)) {
       setAssistantMessages((messages) => [
         ...messages,
-        { role: "user", content: value },
+        { id: crypto.randomUUID(), role: "user", content: value },
         {
+          id: crypto.randomUUID(),
           role: "assistant",
           content: "请先在设置中配置 API Key、Base URL 和模型。",
         },
@@ -288,11 +303,18 @@ function PresetWorkspace({
       return;
     }
 
+    // 如果有编辑器选区，把它作为上下文一起发送
+    const contextPrefix = editorSelectedText
+      ? `[引用编辑器选区]\n> ${editorSelectedText.split("\n").join("\n> ")}\n\n`
+      : "";
+    const fullPrompt = contextPrefix + value;
+
     setAssistantMessages((messages) => [
       ...messages,
-      { role: "user", content: value },
+      { id: crypto.randomUUID(), role: "user", content: fullPrompt },
     ]);
     setAssistantInput("");
+    setEditorSelectedText("");
     setAssistantBusy(true);
 
     try {
@@ -302,11 +324,12 @@ function PresetWorkspace({
         maxOutputTokens: 700,
         system:
           "你是 ChatLuna 预设编辑助手。用户文档中的性格、兴趣、聊天风格、聊天行为及其他原始描述必须逐字保留。禁止重写整份文档。只给出可选的局部修改建议，明确插入位置，并使用短小的 Markdown 或 unified diff。没有必要修改时直接说明。",
-        prompt: `当前文档：\n---\n${source}\n---\n用户请求：${value}`,
+        prompt: `当前文档：\n---\n${source}\n---\n用户请求：${fullPrompt}`,
       });
       setAssistantMessages((messages) => [
         ...messages,
         {
+          id: crypto.randomUUID(),
           role: "assistant",
           content: result.text || "没有生成可用建议。",
         },
@@ -315,6 +338,7 @@ function PresetWorkspace({
       setAssistantMessages((messages) => [
         ...messages,
         {
+          id: crypto.randomUUID(),
           role: "assistant",
           content: sanitizeAIErrorMessage(
             error instanceof Error ? error.message : "请求模型失败",
@@ -360,6 +384,31 @@ function PresetWorkspace({
       setAnalysisBusy(false);
     }
   };
+
+  /** 拖拽分隔线时重新分配相邻两列的 fr 宽度 */
+  const handlePanelResize = useCallback(
+    (colIndex: number, deltaX: number) => {
+      const container = mainPanelRef.current;
+      if (!container) return;
+      const totalWidth = container.offsetWidth;
+      if (totalWidth === 0) return;
+      const totalFr = panelSizes.reduce((a, b) => a + b, 0);
+      const deltaFr = (deltaX / totalWidth) * totalFr;
+      const minFr = 5;
+      setPanelSizes((prev) => {
+        const next = [...prev] as [number, number, number, number];
+        next[colIndex] = Math.max(minFr, next[colIndex] + deltaFr);
+        next[colIndex + 1] = Math.max(minFr, next[colIndex + 1] - deltaFr);
+        return next;
+      });
+    },
+    [panelSizes],
+  );
+
+  /** 根据 panelSizes 和 referenceCollapsed 计算 gridTemplateColumns */
+  const gridTemplateColumns = referenceCollapsed
+    ? `minmax(120px,${panelSizes[0]}fr) minmax(0,${panelSizes[1] + panelSizes[2]}fr) 40px minmax(220px,${panelSizes[3]}fr)`
+    : `minmax(120px,${panelSizes[0]}fr) minmax(0,${panelSizes[1]}fr) minmax(0,${panelSizes[2]}fr) minmax(220px,${panelSizes[3]}fr)`;
 
   return (
     <div className={cn("flex min-h-0 flex-col overflow-hidden bg-background text-foreground", embedded ? "h-full" : "h-screen")}>
@@ -493,23 +542,38 @@ function PresetWorkspace({
 
       <main className="min-h-0 flex-1">
         <div
-          className="hidden h-full min-h-0 transition-[grid-template-columns] duration-200 lg:grid"
-          style={{
-            gridTemplateColumns: referenceCollapsed
-              ? "minmax(150px,18fr) minmax(0,64fr) 40px minmax(260px,18fr)"
-              : "minmax(150px,18fr) minmax(0,32fr) minmax(0,32fr) minmax(260px,18fr)",
-          }}
+          ref={mainPanelRef}
+          className="hidden h-full min-h-0 lg:grid"
+          style={{ gridTemplateColumns }}
         >
-          <OutlinePane outline={outline} onAdd={addSection} />
-          <EditorPane source={source} onChange={setSource} />
+          <OutlinePane
+            outline={outline}
+            activeLine={editorCursorLine}
+            onAdd={addSection}
+            onScrollTo={(line) => scrollToLineRef.current?.(line)}
+          />
+          <ResizeHandle onResize={(dx) => handlePanelResize(0, dx)} />
+          <EditorPane
+            source={source}
+            onChange={setSource}
+            scrollToLineRef={scrollToLineRef}
+            onSelectionChange={setEditorSelectedText}
+            onCursorLineChange={setEditorCursorLine}
+          />
+          <ResizeHandle onResize={(dx) => handlePanelResize(1, dx)} />
           <ReferencePane
             type={type}
             collapsed={referenceCollapsed}
             onToggle={() => setReferenceCollapsed((current) => !current)}
           />
+          {!referenceCollapsed && (
+            <ResizeHandle onResize={(dx) => handlePanelResize(2, dx)} />
+          )}
           <AssistantPane
             messages={assistantMessages}
             input={assistantInput}
+            selectionContext={editorSelectedText}
+            onDismissSelection={() => setEditorSelectedText("")}
             missingSections={missingSections}
             busy={assistantBusy}
             analysis={analysisResult}
@@ -529,16 +593,32 @@ function PresetWorkspace({
 
         <div className="h-full min-h-0 lg:hidden">
           {mobilePane === "outline" && (
-            <OutlinePane outline={outline} onAdd={addSection} />
+            <OutlinePane
+              outline={outline}
+              activeLine={editorCursorLine}
+              onAdd={addSection}
+              onScrollTo={(line) => {
+                scrollToLineRef.current?.(line);
+                setMobilePane("editor");
+              }}
+            />
           )}
           {mobilePane === "editor" && (
-            <EditorPane source={source} onChange={setSource} />
+            <EditorPane
+              source={source}
+              onChange={setSource}
+              scrollToLineRef={scrollToLineRef}
+              onSelectionChange={setEditorSelectedText}
+              onCursorLineChange={setEditorCursorLine}
+            />
           )}
           {mobilePane === "reference" && <ReferencePane type={type} />}
           {mobilePane === "assistant" && (
             <AssistantPane
               messages={assistantMessages}
               input={assistantInput}
+              selectionContext={editorSelectedText}
+              onDismissSelection={() => setEditorSelectedText("")}
               missingSections={missingSections}
               busy={assistantBusy}
               analysis={analysisResult}
@@ -574,11 +654,24 @@ function PaneHeader({ title, action }: { title: string; action?: ReactNode }) {
 
 function OutlinePane({
   outline,
+  activeLine,
   onAdd,
+  onScrollTo,
 }: {
   outline: OutlineEntry[];
+  activeLine: number;
   onAdd: () => void;
+  onScrollTo: (line: number) => void;
 }) {
+  // 找到最后一个 line <= activeLine 的条目作为当前活跃条目
+  const activeIndex = useMemo(() => {
+    let idx = -1;
+    for (let i = 0; i < outline.length; i++) {
+      if (outline[i].line <= activeLine) idx = i;
+    }
+    return idx;
+  }, [outline, activeLine]);
+
   return (
     <section className="flex h-full min-h-0 flex-col border-r bg-muted/15">
       <PaneHeader title="大纲" />
@@ -587,11 +680,12 @@ function OutlinePane({
           <button
             key={`${entry.line}:${entry.label}`}
             type="button"
+            onClick={() => onScrollTo(entry.line)}
             className={cn(
               "flex h-8 w-full items-center gap-1.5 rounded-sm px-2 text-left text-sm hover:bg-muted",
               entry.level === 2 && "pl-5 text-muted-foreground",
               entry.level === 3 && "pl-8 text-xs text-muted-foreground",
-              index === 0 && "bg-muted/70 font-medium text-foreground",
+              index === activeIndex && "bg-muted/70 font-medium text-foreground",
             )}
           >
             <ChevronRight className="size-3 shrink-0" />
@@ -614,9 +708,15 @@ function OutlinePane({
 function EditorPane({
   source,
   onChange,
+  scrollToLineRef,
+  onSelectionChange,
+  onCursorLineChange,
 }: {
   source: string;
   onChange: (value: string) => void;
+  scrollToLineRef?: RefObject<((line: number) => void) | null>;
+  onSelectionChange?: (text: string) => void;
+  onCursorLineChange?: (line: number) => void;
 }) {
   return (
     <section className="flex h-full min-h-0 flex-col border-r">
@@ -625,6 +725,9 @@ function EditorPane({
         <TemplateEditor
           value={source}
           onChange={onChange}
+          onSelectionChange={onSelectionChange}
+          onCursorLineChange={onCursorLineChange}
+          scrollToLineRef={scrollToLineRef}
           context="generic"
           fillHeight
           markdownToolbar
@@ -633,6 +736,38 @@ function EditorPane({
         />
       </div>
     </section>
+  );
+}
+
+/** 可拖拽的面板分隔线 */
+function ResizeHandle({ onResize }: { onResize: (deltaX: number) => void }) {
+  const onResizeRef = useRef(onResize);
+  useEffect(() => { onResizeRef.current = onResize; }, [onResize]);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const onMove = (ev: PointerEvent) => {
+      if (ev.movementX !== 0) onResizeRef.current(ev.movementX);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, []);
+
+  return (
+    <div
+      className="group z-10 -mx-1.5 flex w-3 shrink-0 cursor-col-resize items-center justify-center"
+      onPointerDown={handlePointerDown}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="拖拽调整面板宽度"
+    >
+      <div className="h-8 w-px rounded-full bg-border transition-colors group-hover:bg-primary/50 group-active:bg-primary" />
+      <GripVertical className="absolute size-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+    </div>
   );
 }
 
@@ -689,6 +824,8 @@ function ReferenceText({ value }: { value: string }) {
 function AssistantPane({
   messages,
   input,
+  selectionContext,
+  onDismissSelection,
   missingSections,
   busy,
   analysis,
@@ -706,6 +843,8 @@ function AssistantPane({
 }: {
   messages: AssistantMessage[];
   input: string;
+  selectionContext: string;
+  onDismissSelection: () => void;
   missingSections: string[];
   busy: boolean;
   analysis: string;
@@ -796,19 +935,16 @@ function AssistantPane({
             <>
         <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
-            {messages.map((message, index) =>
+            {messages.map((message) =>
               message.role === "user" ? (
-                <div
-                  key={`${index}:${message.content}`}
-                  className="flex justify-end"
-                >
+                <div key={message.id} className="flex justify-end">
                   <p className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-muted px-3 py-1.5 text-sm leading-6">
                     {message.content}
                   </p>
                 </div>
               ) : (
                 <MessageResponse
-                  key={`${index}:${message.content}`}
+                  key={message.id}
                   className="min-w-0 text-sm leading-6 text-foreground/80"
                 >
                   {message.content}
@@ -817,6 +953,23 @@ function AssistantPane({
             )}
           </div>
           <div className="border-t p-2">
+            {/* 选区上下文 chip */}
+            {selectionContext && (
+              <div className="mb-1.5 flex items-start gap-1.5 rounded-md border border-primary/30 bg-primary/5 px-2 py-1.5 text-xs">
+                <Quote className="mt-0.5 size-3 shrink-0 text-primary/60" />
+                <span className="min-w-0 flex-1 line-clamp-2 text-muted-foreground">
+                  {selectionContext}
+                </span>
+                <button
+                  type="button"
+                  onClick={onDismissSelection}
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                  aria-label="取消引用选区"
+                >
+                  <X className="size-3" />
+                </button>
+              </div>
+            )}
             <div className="flex items-end gap-1 border bg-background p-1">
               <TextareaAutosize
                 value={input}
@@ -829,7 +982,7 @@ function AssistantPane({
                 }}
                 minRows={2}
                 disabled={busy || analysisBusy}
-                placeholder="询问当前文档..."
+                placeholder={selectionContext ? "就选中内容提问…" : "询问当前文档..."}
                 className="min-h-12 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
               />
               <Button

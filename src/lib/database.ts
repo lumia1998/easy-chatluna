@@ -52,10 +52,20 @@ export interface WorkspaceChatSource {
   sourcePath: string;
 }
 
+export interface WorkspaceChatAttachment {
+  /** 文件名，仅供展示 */
+  name: string;
+  /** "text" = txt 等文本文件内容已嵌入 content；"image" = base64 Data URL */
+  kind: "text" | "image";
+  /** text: 文件全文；image: data:image/...;base64,... */
+  data: string;
+}
+
 export interface WorkspaceChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  attachments?: WorkspaceChatAttachment[];
   sources?: WorkspaceChatSource[];
   retrievalWarning?: string;
 }

@@ -3,6 +3,7 @@ import {
   useRef,
   type ComponentProps,
   type MouseEvent,
+  type RefObject,
 } from "react";
 import { basicSetup } from "codemirror";
 import {
@@ -50,6 +51,12 @@ interface TemplateEditorProps {
   id?: string;
   value?: string;
   onChange?: (value: string) => void;
+  /** 选区变化时回调选中文本（无选区时传空字符串） */
+  onSelectionChange?: (text: string) => void;
+  /** 光标所在行变化时回调（1-based） */
+  onCursorLineChange?: (line: number) => void;
+  /** 传入一个 ref，组件会将 scrollToLine 函数写入其 current */
+  scrollToLineRef?: RefObject<((line: number) => void) | null>;
   context?: TemplateEditorContext;
   placeholder?: string;
   minRows?: number;
@@ -71,6 +78,9 @@ export function TemplateEditor({
   id,
   value = "",
   onChange,
+  onSelectionChange,
+  onCursorLineChange,
+  scrollToLineRef,
   context = "generic",
   placeholder,
   minRows = 5,
@@ -85,12 +95,28 @@ export function TemplateEditor({
   const editorRef = useRef<EditorView>(null);
   const valueRef = useRef(value);
   const onChangeRef = useRef(onChange);
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  const onCursorLineChangeRef = useRef(onCursorLineChange);
   const readOnlyRef = useRef(readOnly);
   const theme = useTheme();
 
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+  useEffect(() => { onSelectionChangeRef.current = onSelectionChange; }, [onSelectionChange]);
+  useEffect(() => { onCursorLineChangeRef.current = onCursorLineChange; }, [onCursorLineChange]);
+
+  // 向外暴露 scrollToLine API
   useEffect(() => {
-    onChangeRef.current = onChange;
-  }, [onChange]);
+    if (!scrollToLineRef) return;
+    scrollToLineRef.current = (line: number) => {
+      const view = editorRef.current;
+      if (!view) return;
+      const clamped = Math.max(1, Math.min(line, view.state.doc.lines));
+      const lineInfo = view.state.doc.line(clamped);
+      view.dispatch({ selection: { anchor: lineInfo.from }, scrollIntoView: true });
+      view.focus();
+    };
+    return () => { if (scrollToLineRef) scrollToLineRef.current = null; };
+  }, [scrollToLineRef]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -109,11 +135,23 @@ export function TemplateEditor({
           EditorView.editable.of(!readOnlyRef.current),
         ]),
         EditorView.updateListener.of((update) => {
-          if (!update.docChanged) return;
-          const nextValue = update.state.doc.toString();
-          if (nextValue === valueRef.current) return;
-          valueRef.current = nextValue;
-          onChangeRef.current?.(nextValue);
+          if (update.docChanged) {
+            const nextValue = update.state.doc.toString();
+            if (nextValue !== valueRef.current) {
+              valueRef.current = nextValue;
+              onChangeRef.current?.(nextValue);
+            }
+          }
+          if (update.selectionSet || update.docChanged) {
+            const sel = update.state.selection.main;
+            if (!sel.empty) {
+              onSelectionChangeRef.current?.(update.state.sliceDoc(sel.from, sel.to));
+            } else {
+              onSelectionChangeRef.current?.("");
+            }
+            const cursorLine = update.state.doc.lineAt(sel.head).number;
+            onCursorLineChangeRef.current?.(cursorLine);
+          }
         }),
       ],
     });
