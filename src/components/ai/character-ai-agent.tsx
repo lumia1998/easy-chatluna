@@ -256,7 +256,7 @@ function CharacterAIAgentSession({
             sessionId: getAgentChatSessionId(presetType, presetId),
             message:
               error instanceof Error
-                ? sanitizeAIErrorMessage(error.message)
+                ? sanitizeAIErrorMessage(error.message, undefined)
                 : "会话初始化失败，请重试。",
           });
         }
@@ -322,6 +322,7 @@ function CharacterAIAgentSession({
     <CharacterAIAgentChat
       key={session.id}
       session={session}
+      modelConfig={modelConfig}
       modelLabel={modelLabel}
       reasoning={reasoning}
       reasoningLevels={reasoningLevels}
@@ -336,6 +337,7 @@ function CharacterAIAgentSession({
 
 function CharacterAIAgentChat({
   session,
+  modelConfig,
   modelLabel,
   reasoning,
   reasoningLevels,
@@ -346,6 +348,7 @@ function CharacterAIAgentChat({
   onNewChatActionChange,
 }: {
   session: AgentChatSession;
+  modelConfig: AIModelConfig;
   modelLabel: string;
   reasoning: AIReasoningLevel | undefined;
   reasoningLevels: AIReasoningLevel[];
@@ -605,7 +608,7 @@ function CharacterAIAgentChat({
           {error && (
             <Message from="assistant">
               <MessageContent className="text-destructive">
-                <MessageResponse>{sanitizeAIErrorMessage(error.message)}</MessageResponse>
+                <MessageResponse>{sanitizeAIErrorMessage(error.message, modelConfig.apiKey)}</MessageResponse>
               </MessageContent>
             </Message>
           )}

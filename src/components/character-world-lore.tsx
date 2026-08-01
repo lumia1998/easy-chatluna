@@ -69,7 +69,16 @@ export function CharacterWorldLore({
             if (!isWorldLore(lore)) return;
             const currentKeywords = normalizeKeywords(lore.keywords);
             const key = `${loreId}-${kidx}`;
-            currentKeywords[kidx] = isRegexMap[key] ? new RegExp(value) : value;
+            if (isRegexMap[key]) {
+                try {
+                    currentKeywords[kidx] = new RegExp(value);
+                } catch {
+                    // 非法正则保持字符串，不更新
+                    return;
+                }
+            } else {
+                currentKeywords[kidx] = value;
+            }
             updatePreset?.(`world_lores.${index}.keywords`, currentKeywords);
         };
 

@@ -34,11 +34,10 @@ import {
 import { cn } from "@/lib/utils";
 import {
   createWorkspacePreset,
-  deletePreset,
   renamePresetData,
 } from "@/lib/preset-store";
 import { renamePresetSource } from "@/lib/workspace-preset-import";
-import { mutatePreset } from "@/lib/preset-mutation-queue";
+import { mutatePreset, deletePresetAndData } from "@/lib/preset-mutation-queue";
 import { toast } from "sonner";
 import type { PresetModel } from "@/lib/database";
 
@@ -214,7 +213,7 @@ export default function HomePage() {
 
   const removePreset = async (preset: PresetModel) => {
     try {
-      await deletePreset(preset.id);
+      await deletePresetAndData(preset.id);
       closeTab(`preset:${preset.id}`);
       toast.success(`已删除 ${preset.name}`);
     } catch {

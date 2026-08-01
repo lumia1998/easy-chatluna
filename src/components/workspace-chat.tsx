@@ -51,7 +51,6 @@ import {
   type AIReasoningLevel,
 } from "@/types/ai";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 
 const CHAT_SYSTEM_PROMPT =
   "你是 Easy ChatLuna 助手。回答清晰、直接；涉及预设创作时保留用户给出的原始设定，不擅自改写。";
@@ -387,10 +386,10 @@ export function WorkspaceChat({
               <Button type="button" variant="ghost" size="icon"
                 className="size-8 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
                 onClick={() => fileInputRef.current?.click()} disabled={busy}
-                aria-label="上传文件（txt、图片）" title="上传文件（txt、图片）">
+                aria-label="上传文件（txt、yml、图片）" title="上传文件（txt、yml、图片）">
                 <Paperclip className="size-4" />
               </Button>
-              <input ref={fileInputRef} type="file" accept=".txt,.md,.csv,.json,image/*"
+              <input ref={fileInputRef} type="file" accept=".txt,.md,.csv,.json,.yml,.yaml,image/*"
                 multiple className="hidden" onChange={handleFileChange} aria-hidden="true" />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

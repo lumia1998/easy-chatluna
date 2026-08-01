@@ -3,6 +3,7 @@ import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 
+import { ErrorBoundary } from "@/components/error-boundary";
 import { ThemeProvider } from "@/components/ui/theme";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { createHashRouter, Navigate, RouterProvider } from "react-router";
@@ -94,19 +95,21 @@ void hydrateAIModelConfigSecrets()
         }
         createRoot(document.getElementById("root")!).render(
             <StrictMode>
-                <ThemeProvider>
-                    <TooltipProvider>
-                        <Suspense
-                            fallback={
-                                <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
-                                    正在加载...
-                                </div>
-                            }
-                        >
-                            <RouterProvider router={router}></RouterProvider>
-                        </Suspense>
-                    </TooltipProvider>
-                </ThemeProvider>
+                <ErrorBoundary>
+                    <ThemeProvider>
+                        <TooltipProvider>
+                            <Suspense
+                                fallback={
+                                    <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
+                                        正在加载...
+                                    </div>
+                                }
+                            >
+                                <RouterProvider router={router}></RouterProvider>
+                            </Suspense>
+                        </TooltipProvider>
+                    </ThemeProvider>
+                </ErrorBoundary>
             </StrictMode>
         );
     });

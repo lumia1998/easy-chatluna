@@ -12,6 +12,7 @@ export function sanitizeAIErrorMessage(
   }
   return text
     .replace(/sk-[a-zA-Z0-9_-]+/g, "[redacted]")
+    .replace(/AIza[a-zA-Z0-9_-]{35,}/g, "[redacted]")
     .replace(/Bearer\s+[a-zA-Z0-9._-]+/gi, "Bearer [redacted]")
     .replace(
       /api[_-]?key["']?\s*[:=]\s*["']?[^"'\s]+/gi,

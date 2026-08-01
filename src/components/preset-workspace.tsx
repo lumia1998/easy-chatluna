@@ -20,8 +20,10 @@ import {
   PanelRightOpen,
   Plus,
   Quote,
+  RotateCcw,
   Settings2,
   Sparkles,
+  Upload,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -69,6 +71,7 @@ import {
   type AIReasoningLevel,
 } from "@/types/ai";
 import { toast } from "sonner";
+import { load } from "js-yaml";
 
 type WorkspacePane = "outline" | "editor" | "reference" | "assistant";
 
@@ -771,6 +774,66 @@ function ResizeHandle({ onResize }: { onResize: (deltaX: number) => void }) {
   );
 }
 
+/**
+ * 从预设 YAML 中提取参考文本（去掉 input 等运行时字段）：
+ * - character：name + system + status
+ * - main：keywords[0] + prompts 中 role=system 的 content + format_user_prompt
+ */
+function referenceFromPresetYaml(
+  raw: string,
+  type: WorkspacePresetType,
+): string | null {
+  let parsed: unknown;
+  try {
+    parsed = load(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const record = parsed as Record<string, unknown>;
+
+  if (type === "character") {
+    if (typeof record.system !== "string") return null;
+    const parts = [
+      `# ${typeof record.name === "string" && record.name.trim() ? record.name : "角色"}`,
+      record.system.trim(),
+    ];
+    if (typeof record.status === "string" && record.status.trim()) {
+      parts.push(`## status\n\n${record.status.trim()}`);
+    }
+    return parts.join("\n\n");
+  }
+
+  // main：prompts 数组里第一个 role=system 的 content 即人设主体
+  const prompts = record.prompts;
+  if (!Array.isArray(prompts)) return null;
+  const systemPrompt = prompts.find(
+    (entry): entry is Record<string, unknown> =>
+      !!entry &&
+      typeof entry === "object" &&
+      (entry as Record<string, unknown>).role === "system" &&
+      typeof (entry as Record<string, unknown>).content === "string",
+  );
+  if (!systemPrompt) return null;
+  const keywords = record.keywords;
+  const name =
+    Array.isArray(keywords) &&
+    typeof keywords[0] === "string" &&
+    keywords[0].trim()
+      ? keywords[0]
+      : "主插件预设";
+  const parts = [`# ${name}`, String(systemPrompt.content).trim()];
+  if (
+    typeof record.format_user_prompt === "string" &&
+    record.format_user_prompt.trim()
+  ) {
+    parts.push(
+      `## 用户消息格式\n\n${record.format_user_prompt.trim()}`,
+    );
+  }
+  return parts.join("\n\n");
+}
+
 function ReferencePane({
   type,
   collapsed = false,
@@ -780,6 +843,37 @@ function ReferencePane({
   collapsed?: boolean;
   onToggle?: () => void;
 }) {
+  const [customReference, setCustomReference] = useState<string | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
+  const reference = customReference ?? XIAOKUI_REFERENCES[getDefaultFormat(type)];
+
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const extracted = referenceFromPresetYaml(await file.text(), type);
+      if (!extracted) {
+        toast.error(
+          type === "character"
+            ? "模板格式不正确：伪装预设需包含 system 字段"
+            : "模板格式不正确：主插件预设需包含 prompts 数组",
+        );
+        return;
+      }
+      setCustomReference(extracted);
+      toast.success(
+        type === "character"
+          ? "参考模板已导入，已提取 system 人设内容"
+          : "参考模板已导入，已提取 system 提示词",
+      );
+    } catch {
+      toast.error("模板文件解析失败");
+    } finally {
+      input.value = "";
+    }
+  };
+
   return (
     <section className="flex h-full min-h-0 flex-col border-r bg-muted/10">
       <div
@@ -790,6 +884,39 @@ function ReferencePane({
       >
         {!collapsed && (
           <span className="text-xs font-medium text-muted-foreground">参考</span>
+        )}
+        {!collapsed && (
+          <div className="flex items-center gap-0.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => importRef.current?.click()}
+              aria-label="导入参考模板"
+              title="导入参考模板（yml/yaml，自动提取 system 人设）"
+            >
+              <Upload className="size-3.5" />
+            </Button>
+            {customReference && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => setCustomReference(null)}
+                aria-label="恢复默认参考模板"
+                title="恢复默认参考模板"
+              >
+                <RotateCcw className="size-3.5" />
+              </Button>
+            )}
+            <input
+              ref={importRef}
+              type="file"
+              accept=".yml,.yaml"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+          </div>
         )}
         {onToggle && (
           <Button
@@ -806,7 +933,7 @@ function ReferencePane({
       </div>
       {!collapsed && (
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
-          <ReferenceText value={XIAOKUI_REFERENCES[getDefaultFormat(type)]} />
+          <ReferenceText value={reference} />
         </div>
       )}
     </section>
