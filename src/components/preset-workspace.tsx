@@ -408,10 +408,32 @@ function PresetWorkspace({
     [panelSizes],
   );
 
+  /** 折叠参考时，拖拽手柄调整「编辑器(含参考fr)」与「对话」之间的宽度 */
+  const handlePanelResizeCollapsed = useCallback((deltaX: number) => {
+    const container = mainPanelRef.current;
+    if (!container) return;
+    const totalWidth = container.offsetWidth;
+    if (totalWidth === 0) return;
+    setPanelSizes((prev) => {
+      const totalFr = prev[0] + prev[1] + prev[2] + prev[3];
+      const deltaFr = (deltaX / totalWidth) * totalFr;
+      const editorFr = Math.max(prev[1] + prev[2], 5);
+      const nextEditor = Math.max(5, editorFr + deltaFr);
+      const nextAssistant = Math.max(5, prev[3] - deltaFr);
+      const ratio = editorFr > 0 ? nextEditor / editorFr : 1;
+      return [
+        prev[0],
+        Math.max(5, prev[1] * ratio),
+        Math.max(5, prev[2] * ratio),
+        nextAssistant,
+      ];
+    });
+  }, []);
+
   /** 根据 panelSizes 和 referenceCollapsed 计算 gridTemplateColumns */
   const gridTemplateColumns = referenceCollapsed
-    ? `minmax(120px,${panelSizes[0]}fr) minmax(0,${panelSizes[1] + panelSizes[2]}fr) 40px minmax(220px,${panelSizes[3]}fr)`
-    : `minmax(120px,${panelSizes[0]}fr) minmax(0,${panelSizes[1]}fr) minmax(0,${panelSizes[2]}fr) minmax(220px,${panelSizes[3]}fr)`;
+    ? `minmax(120px,${panelSizes[0]}fr) 12px minmax(0,${panelSizes[1] + panelSizes[2]}fr) 12px minmax(220px,${panelSizes[3]}fr)`
+    : `minmax(120px,${panelSizes[0]}fr) 12px minmax(0,${panelSizes[1]}fr) 12px minmax(0,${panelSizes[2]}fr) 12px minmax(220px,${panelSizes[3]}fr)`;
 
   return (
     <div className={cn("flex min-h-0 flex-col overflow-hidden bg-background text-foreground", embedded ? "h-full" : "h-screen")}>
@@ -562,15 +584,19 @@ function PresetWorkspace({
             scrollToLineRef={scrollToLineRef}
             onSelectionChange={setEditorSelectedText}
             onCursorLineChange={setEditorCursorLine}
+            referenceCollapsed={referenceCollapsed}
+            onToggleReference={() => setReferenceCollapsed((current) => !current)}
           />
-          <ResizeHandle onResize={(dx) => handlePanelResize(1, dx)} />
-          <ReferencePane
-            type={type}
-            collapsed={referenceCollapsed}
-            onToggle={() => setReferenceCollapsed((current) => !current)}
-          />
+          <ResizeHandle onResize={referenceCollapsed ? handlePanelResizeCollapsed : (dx) => handlePanelResize(1, dx)} />
           {!referenceCollapsed && (
-            <ResizeHandle onResize={(dx) => handlePanelResize(2, dx)} />
+            <>
+              <ReferencePane
+                type={type}
+                collapsed={referenceCollapsed}
+                onToggle={() => setReferenceCollapsed((current) => !current)}
+              />
+              <ResizeHandle onResize={(dx) => handlePanelResize(2, dx)} />
+            </>
           )}
           <AssistantPane
             messages={assistantMessages}
@@ -714,16 +740,19 @@ function EditorPane({
   scrollToLineRef,
   onSelectionChange,
   onCursorLineChange,
+  referenceCollapsed,
+  onToggleReference,
 }: {
   source: string;
   onChange: (value: string) => void;
   scrollToLineRef?: RefObject<((line: number) => void) | null>;
   onSelectionChange?: (text: string) => void;
   onCursorLineChange?: (line: number) => void;
+  referenceCollapsed?: boolean;
+  onToggleReference?: () => void;
 }) {
   return (
     <section className="flex h-full min-h-0 flex-col border-r">
-      <PaneHeader title="Markdown 编辑器" />
       <div className="min-h-0 flex-1">
         <TemplateEditor
           value={source}
@@ -736,6 +765,21 @@ function EditorPane({
           markdownToolbar
           minRows={10}
           ariaLabel="预设 Markdown 编辑器"
+          toolbarExtra={
+            onToggleReference ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="size-7"
+                onClick={onToggleReference}
+                aria-label={referenceCollapsed ? "展开参考模板" : "收起参考模板"}
+                title={referenceCollapsed ? "展开参考模板" : "收起参考模板"}
+              >
+                {referenceCollapsed ? <PanelRightOpen className="size-3.5" /> : <PanelRightClose className="size-3.5" />}
+              </Button>
+            ) : undefined
+          }
         />
       </div>
     </section>

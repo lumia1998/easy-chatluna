@@ -251,7 +251,7 @@ export default function HomePage() {
   );
   return (
     <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex h-12 shrink-0 items-center justify-between border-b px-2 sm:px-3">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b px-3 sm:px-4">
         <div className="flex min-w-0 items-center gap-1.5">
           <Button
             type="button"
@@ -383,7 +383,7 @@ function SidebarFiles({
     <section className="flex min-h-0 flex-col border-b">
       <div className="flex h-9 shrink-0 items-center justify-between px-3 text-xs font-medium text-muted-foreground">
         <span>项目</span>
-        <div className="flex gap-0.5">
+        <div className="flex gap-1 pr-0.5">
           <Button variant="ghost" size="icon-xs" onClick={() => onCreatePreset("main")} aria-label="新建主插件预设" title="新建主插件预设"><Plus /></Button>
           <Button variant="ghost" size="icon-xs" onClick={() => onCreatePreset("character")} aria-label="新建伪装预设" title="新建伪装预设"><Sparkles /></Button>
         </div>
@@ -432,7 +432,7 @@ function SidebarConversations({
           <div key={conversation.id} className={cn("group flex items-center rounded-sm transition-colors hover:bg-muted", conversation.id === activeId && "bg-muted font-medium")}>
             <button type="button" onClick={() => onSelect(conversation.id)} className="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left text-sm">
               <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate">{conversation.title}</span>
+              <span className="block truncate">{conversation.title}</span>
             </button>
             <Button type="button" variant="ghost" size="icon-xs" className="mr-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100" onClick={() => onRemove(conversation.id)} aria-label={`删除对话 ${conversation.title}`} title="删除对话"><X /></Button>
           </div>

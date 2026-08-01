@@ -206,6 +206,21 @@ function persistModelConfigStore(store: AIModelConfigStore): void {
     }
   }
 
+  // 同步写入明文备份，确保即使异步加密未完成也能恢复 apiKey
+  const backupSecrets: Record<string, string> = {};
+  for (const config of store.configs) {
+    const secret = config.apiKey.trim();
+    if (secret) backupSecrets[config.id] = secret;
+  }
+  try {
+    localStorage.setItem(
+      AI_MODEL_CONFIG_STORAGE_KEY + ":backup",
+      JSON.stringify(backupSecrets),
+    );
+  } catch {
+    // 明文备份可选，失败不影响主流程
+  }
+
   if (Object.keys(secretUpdates).length > 0 || removedSecretIds.length > 0) {
     secretWriteQueue = secretWriteQueue
       .catch(() => undefined)
@@ -237,12 +252,17 @@ export async function hydrateAIModelConfigSecrets(): Promise<void> {
       loadSecretMap(localStorage, LEGACY_PERSISTENT_SECRET_STORAGE_KEY),
     ),
   ]);
+  const backupSecrets = loadSecretMap(
+    localStorage,
+    AI_MODEL_CONFIG_STORAGE_KEY + ":backup",
+  );
   const legacySessionSecrets = loadSecretMap(
     sessionStorage,
     AI_MODEL_CONFIG_SECRET_STORAGE_KEY,
   );
   const embeddedLegacySecrets = loadEmbeddedLegacySecrets();
   const secrets = {
+    ...backupSecrets,
     ...embeddedLegacySecrets,
     ...legacyPersistentSecrets,
     ...legacySessionSecrets,

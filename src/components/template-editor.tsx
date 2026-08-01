@@ -3,6 +3,7 @@ import {
   useRef,
   type ComponentProps,
   type MouseEvent,
+  type ReactNode,
   type RefObject,
 } from "react";
 import { basicSetup } from "codemirror";
@@ -66,6 +67,8 @@ interface TemplateEditorProps {
   readOnly?: boolean;
   fillHeight?: boolean;
   markdownToolbar?: boolean;
+  /** 额外渲染在格式工具栏最右侧的节点（如面板收纳按钮） */
+  toolbarExtra?: ReactNode;
 }
 
 const templateExtension = new Compartment();
@@ -90,6 +93,7 @@ export function TemplateEditor({
   readOnly = false,
   fillHeight = false,
   markdownToolbar = false,
+  toolbarExtra,
 }: TemplateEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<EditorView>(null);
@@ -317,6 +321,7 @@ export function TemplateEditor({
           onInline={applyInline}
           onLinePrefix={applyLinePrefix}
           onEscape={escapeSelection}
+          extra={toolbarExtra}
         />
       )}
       <div className={cn("relative min-h-0", fillHeight && "flex-1")}>
@@ -343,10 +348,12 @@ function MarkdownToolbar({
   onInline,
   onLinePrefix,
   onEscape,
+  extra,
 }: {
   onInline: (before: string, after: string, placeholderText: string) => void;
   onLinePrefix: (prefix: string, stripHeadings?: boolean) => void;
   onEscape: () => void;
+  extra?: ReactNode;
 }) {
   const keepSelection = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -401,6 +408,11 @@ function MarkdownToolbar({
       <ToolbarButton label="转义花括号" onMouseDown={keepSelection} onClick={onEscape}>
         <Braces />
       </ToolbarButton>
+      {extra && (
+        <span className="ml-auto flex shrink-0 items-center gap-0.5 pl-2">
+          {extra}
+        </span>
+      )}
     </div>
   );
 
